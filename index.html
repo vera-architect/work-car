@@ -1,0 +1,1088 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>작업 차량 계산기</title>
+<meta name="description" content="차 번호 하나만 넣으면, 라인이 설 때 작업할 마지막 차량을 알려줘요.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="작업 차량 계산기">
+<meta property="og:description" content="차 번호 하나만 넣으면, 라인이 설 때 작업할 마지막 차량을 알려줘요.">
+<meta property="og:url" content="https://vera-architect.github.io/work-car/">
+<meta property="og:image" content="https://vera-architect.github.io/work-car/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#E6E9EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0D1013" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="차량 계산기">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612+Mono:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap" media="print" onload="this.media='all'">
+<style>
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+</style>
+<style>
+/* layout: two screens in work order — A (1 round, 2 car set) → B (3 andon result + 4 line scene, fills one phone screen); settings behind the gear on both */
+:root {
+  --bg: #E6E9EC;
+  --surface: #F7F8F9;
+  --line: #C3CAD2;
+  --fg: #191E24;
+  --muted: #56616C;
+  --accent: #F2C200;
+  --accent-ink: #191E24;
+  --accent-press: #C99F00;
+  --panel: #13171C;
+  --panel-line: #2A3139;
+  --panel-fg: #FFC21F;
+  --panel-unlit: #2B2717;
+  --panel-glow: rgba(255, 194, 31, 0.22);
+  --panel-sub: #B9A46C;
+  --panel-text: #E8E3D4;
+  --panel-short: #7CC4FF;
+  --warn: #A63E0C;
+  --warn-bg: #F9E2D3;
+  --focus: #1F6FEB;
+  --over: #8A6000;
+  --short: #1E5E99;
+  --ref: #C2410C;
+  --car: #B4BEC8;
+  --car-line: #3E4852;
+  --car-win: #4C5965;
+  --car-over: #F2C200;
+  --car-short: #D3E5F5;
+  --tire: #1C2026;
+  --hub: #9AA4AE;
+  --lamp-f: #FFF1B8;
+  --lamp-r: #D23B2A;
+  --belt: #8B95A0;
+  --belt-slat: #6B7581;
+  --font-ui: 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  --font-num: 'B612 Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1013; --surface: #161A1F; --line: #2C333B; --fg: #E5E8EC; --muted: #9AA5B0;
+    --accent: #F2C200; --accent-ink: #13171C; --accent-press: #C99F00;
+    --panel: #07090B; --panel-line: #262D35; --panel-fg: #FFC21F; --panel-unlit: #221F13;
+    --panel-glow: rgba(255, 194, 31, 0.22); --panel-sub: #AA955C; --panel-text: #E8E3D4; --panel-short: #7CC4FF;
+    --warn: #F0935C; --warn-bg: #35190C; --focus: #6CA6FF;
+    --over: #FFC21F; --short: #7CC4FF; --ref: #FF7A45;
+    --car: #5C6774; --car-line: #AEB8C2; --car-win: #1E2A35; --car-over: #F2C200; --car-short: #23384D;
+    --tire: #090B0D; --hub: #7D8893; --lamp-f: #FFF1B8; --lamp-r: #FF6B57; --belt: #3A434D; --belt-slat: #262D35;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1013; --surface: #161A1F; --line: #2C333B; --fg: #E5E8EC; --muted: #9AA5B0;
+  --accent: #F2C200; --accent-ink: #13171C; --accent-press: #C99F00;
+  --panel: #07090B; --panel-line: #262D35; --panel-fg: #FFC21F; --panel-unlit: #221F13;
+  --panel-glow: rgba(255, 194, 31, 0.22); --panel-sub: #AA955C; --panel-text: #E8E3D4; --panel-short: #7CC4FF;
+  --warn: #F0935C; --warn-bg: #35190C; --focus: #6CA6FF;
+  --over: #FFC21F; --short: #7CC4FF; --ref: #FF7A45;
+  --car: #5C6774; --car-line: #AEB8C2; --car-win: #1E2A35; --car-over: #F2C200; --car-short: #23384D;
+  --tire: #090B0D; --hub: #7D8893; --lamp-f: #FFF1B8; --lamp-r: #FF6B57; --belt: #3A434D; --belt-slat: #262D35;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { height: 100%; }
+body {
+  margin: 0; min-height: 100%;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+  padding-block: 12px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+body.is-b { padding-block-end: 12px; }
+.wrap { flex: 1; width: 100%; max-width: 520px; margin: 0 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+b { font-weight: 700; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* header: both screens */
+.brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+h1 { margin: 0; min-width: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.brand-r { flex: none; display: flex; align-items: center; gap: 8px; }
+.clock { font-family: var(--font-num); font-size: 17px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.gear {
+  appearance: none; flex: none; width: 44px; height: 44px; padding: 0; cursor: pointer;
+  display: inline-grid; place-items: center; border-radius: 12px;
+  border: 1.5px solid var(--line); background: var(--surface); color: var(--fg);
+}
+.gear svg { width: 24px; height: 24px; display: block; fill: currentColor; }
+.gear[aria-expanded="true"] { background: var(--fg); border-color: var(--fg); color: var(--surface); }
+
+.view { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+h2 { margin: 0; font-size: 17px; font-weight: 700; display: flex; align-items: center; }
+.step {
+  display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; margin-right: 8px; border-radius: 50%;
+  background: var(--fg); color: var(--surface); font-family: var(--font-num); font-size: 13px; font-weight: 700;
+}
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.help { margin: 0; font-size: 14px; color: var(--muted); }
+.help b { color: var(--fg); }
+.seg { display: inline-grid; grid-auto-flow: column; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--bg); }
+.seg button {
+  appearance: none; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: 14px; font-weight: 700;
+  min-height: 40px; padding: 4px 14px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--surface); }
+.link { appearance: none; border: 0; background: none; color: var(--fg); font: inherit; font-size: 14px; font-weight: 700; padding: 6px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.btn-ghost {
+  appearance: none; min-height: 44px; padding: 8px 16px; cursor: pointer;
+  border: 1.5px solid var(--fg); border-radius: 10px; background: transparent; color: var(--fg); font: inherit; font-weight: 700;
+}
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 700; line-height: 1.7; white-space: nowrap; }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+
+/* A-1. round picker */
+.chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.chip-btn {
+  appearance: none; min-height: 62px; padding: 6px 2px; cursor: pointer; border-radius: 10px;
+  border: 1.5px solid var(--line); background: var(--bg); color: var(--fg); font: inherit;
+  display: grid; align-content: center; justify-items: center; min-width: 0;
+}
+.chip-btn .r { font-size: 12px; font-weight: 700; color: var(--muted); }
+.chip-btn .t { font-family: var(--font-num); font-size: 15px; }
+.chip-btn .s { font-size: 11px; color: var(--muted); font-family: var(--font-num); }
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip-btn[aria-pressed="true"] .r, .chip-btn[aria-pressed="true"] .s { color: var(--accent-ink); }
+.chip-btn:disabled { opacity: 0.4; cursor: default; }
+.custom { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 14px; color: var(--muted); }
+
+/* A-2. car set */
+.set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+#carNo {
+  width: 100%; min-height: 60px; padding: 8px 10px; text-align: center;
+  font-family: var(--font-num); font-size: 30px; letter-spacing: 0.08em;
+  border: 2px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg);
+}
+#carNo:focus { outline: none; border-color: var(--focus); }
+.btn-primary {
+  appearance: none; border: 0; border-radius: 10px; min-height: 60px; padding: 0 20px; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 18px; font-weight: 700;
+  box-shadow: inset 0 -4px 0 var(--accent-press);
+}
+.btn-primary:active { transform: translateY(1px); box-shadow: inset 0 -1px 0 var(--accent-press); }
+.tip { margin: 0; font-size: 13px; color: var(--muted); }
+.tip b { color: var(--fg); }
+.err { margin: 0; font-size: 14px; font-weight: 700; color: var(--warn); }
+.err:empty { display: none; }
+.cur { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; border-top: 1px dashed var(--line); padding-top: 8px; font-size: 14px; color: var(--muted); }
+.cur b { color: var(--fg); font-family: var(--font-num); font-weight: 400; }
+.foot { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.foot p { margin: 0; }
+.foot b { color: var(--fg); }
+
+/* B. result screen — fills the screen height */
+.view-b { flex: 1; gap: 10px; }
+.bbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.btn-back {
+  appearance: none; flex: none; display: inline-flex; align-items: center; gap: 4px;
+  min-height: 44px; padding: 6px 14px 6px 8px; cursor: pointer;
+  border: 1.5px solid var(--fg); border-radius: 10px; background: var(--surface); color: var(--fg);
+  font: inherit; font-size: 15px; font-weight: 700;
+}
+.btn-back svg { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.bbar-info { min-width: 0; font-size: 13px; color: var(--muted); text-align: right; }
+.bbar-info b { color: var(--fg); font-family: var(--font-num); font-weight: 400; }
+
+.andon { flex: none; background: var(--panel); color: var(--panel-text); border: 1px solid var(--panel-line); border-radius: 14px; overflow: hidden; }
+.tape { height: 8px; background: repeating-linear-gradient(-45deg, var(--accent) 0 10px, var(--panel) 10px 20px); }
+.andon-in { padding: 12px 16px 14px; display: grid; gap: 8px; }
+.andon h2 { color: var(--panel-text); font-size: 16px; }
+.andon .step { background: var(--panel-fg); color: var(--panel); }
+.a-explain { margin: 0; font-size: 15px; line-height: 1.55; color: var(--panel-text); }
+.a-explain b { color: var(--panel-text); }
+.a-explain b.ref { color: var(--panel-short); font-family: var(--font-num); }
+.a-explain .off { color: var(--panel-short); font-size: 14px; }
+.a-label { font-size: 13px; font-weight: 500; letter-spacing: 0.06em; color: var(--panel-sub); border-top: 1px solid var(--panel-line); padding-top: 8px; }
+.digits {
+  display: grid; font-family: var(--font-num); font-weight: 700; line-height: 1; letter-spacing: 0.04em; font-variant-numeric: tabular-nums;
+  font-size: clamp(60px, min(26vw, 12.5vh), 132px);
+  font-size: clamp(60px, min(26vw, 12.5svh), 132px);
+}
+.digits > span { grid-area: 1 / 1; }
+.unlit { color: var(--panel-unlit); }
+.lit { color: var(--panel-fg); text-shadow: 0 0 18px var(--panel-glow); }
+.lit.off { color: var(--panel-sub); text-shadow: none; }
+.a-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; border-top: 1px solid var(--panel-line); padding-top: 8px; }
+.a-stats > div { display: grid; gap: 1px; min-width: 0; }
+.a-stats .k { font-size: 12px; color: var(--panel-sub); }
+.a-stats .v { font-family: var(--font-num); font-size: 21px; color: var(--panel-text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a-foot { font-size: 13px; color: var(--panel-sub); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
+.a-foot:empty { display: none; }
+.a-foot b { color: var(--panel-text); font-family: var(--font-num); font-weight: 400; }
+
+.scene-card { flex: 1 1 auto; align-content: start; grid-template-rows: auto minmax(100px, 1fr) auto; gap: 6px; padding: 12px 14px; }
+.scene-box { position: relative; min-height: 100px; }
+#scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#scene text { font-family: var(--font-num); }
+.t-num { font-size: 14px; font-weight: 700; fill: var(--muted); }
+.t-num.over { fill: var(--over); }
+.t-num.short { fill: var(--short); }
+.t-lbl { font-family: var(--font-ui) !important; font-size: 11px; fill: var(--muted); }
+.t-ref { font-family: var(--font-ui) !important; font-size: 12px; font-weight: 700; fill: var(--ref); }
+.t-ann { font-size: 13px; font-weight: 700; }
+.t-ann.short { fill: var(--short); }
+.t-tag { font-family: var(--font-ui) !important; font-size: 11px; font-weight: 700; }
+.t-tag.over { fill: var(--over); }
+.t-tag.short { fill: var(--short); }
+.ref-line { stroke: var(--ref); stroke-width: 2; stroke-dasharray: 5 4; }
+.ann { stroke-width: 2; fill: none; }
+.ann.short { stroke: var(--short); }
+.belt { fill: var(--belt); }
+.belt-slat { fill: var(--belt-slat); }
+.car .body { fill: var(--car); stroke: var(--car-line); stroke-width: 1; stroke-linejoin: round; }
+.car .win { fill: var(--car-win); }
+.car .trim { fill: none; stroke: var(--car-line); stroke-width: 0.8; opacity: 0.55; }
+.car .tire { fill: var(--tire); }
+.car .hub { fill: var(--hub); }
+.car .lamp-f { fill: var(--lamp-f); }
+.car .lamp-r { fill: var(--lamp-r); }
+.car.over .body { fill: var(--car-over); }
+.car.short .body { fill: var(--car-short); stroke-dasharray: 3 2; }
+.car.ghost { opacity: 0.35; }
+.caption { margin: 0; font-size: 14px; color: var(--fg); }
+.caption b { font-family: var(--font-num); font-weight: 700; }
+.caption b.over { color: var(--over); }
+.caption b.short { color: var(--short); }
+
+/* short screens (phone browser with bars): tighten the result screen so 3 and 4 still fit */
+@media (max-height: 760px) {
+  body.is-b { padding-block: 8px; }
+  body.is-b .wrap, .view-b { gap: 8px; }
+  body.is-b h1 { font-size: 16px; }
+  body.is-b .clock { font-size: 15px; }
+  body.is-b .gear { width: 40px; height: 40px; }
+  .btn-back { min-height: 40px; }
+  .andon-in { padding: 10px 12px 12px; gap: 6px; }
+  .a-explain { font-size: 14px; line-height: 1.45; }
+  .a-label { padding-top: 6px; }
+  .a-stats { padding-top: 6px; }
+  .a-stats .v { font-size: 19px; }
+  .a-foot { display: none; }
+  .scene-card { padding: 10px 12px; gap: 4px; grid-template-rows: auto minmax(84px, 1fr) auto; }
+  .scene-card .seg button { min-height: 36px; }
+  .caption { font-size: 13px; line-height: 1.4; }
+}
+
+/* very short screens: drop the 3 heading and the caption so the number and the picture stay on one screen */
+@media (max-height: 600px) {
+  .andon h2 { display: none; }
+  .tape { height: 6px; }
+  .digits { font-size: clamp(52px, min(24vw, 11vh), 132px); font-size: clamp(52px, min(24vw, 11svh), 132px); }
+  .caption { display: none; }
+  .scene-card { grid-template-rows: auto minmax(84px, 1fr); }
+}
+
+/* settings */
+.view-s h2 { font-size: 18px; }
+.set-body { display: grid; gap: 16px; }
+.field { display: grid; gap: 6px; }
+.field > label, fieldset legend { font-size: 14px; font-weight: 700; }
+.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+input[type="number"], input[type="time"] {
+  min-height: 44px; padding: 8px 10px; font-family: var(--font-num); font-size: 16px;
+  border: 1.5px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); min-width: 0;
+}
+#takt { width: 8em; }
+fieldset { margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; display: grid; gap: 10px; }
+fieldset legend { padding: 0 4px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.grid2 label, .grid3 label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.grid2 input, .grid3 input { width: 100%; }
+.note { margin: 0; font-size: 13px; color: var(--muted); }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px)); max-width: calc(100% - 32px);
+  padding: 10px 16px; border-radius: 999px; background: var(--fg); color: var(--bg);
+  font-size: 14px; font-weight: 700; text-align: center;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+<style>
+body {
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(32px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+}
+body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
+@media (max-height: 760px) {
+  body.is-b { padding-top: max(8px, env(safe-area-inset-top, 0px)); padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="brand">
+    <h1>작업 차량 계산기</h1>
+    <div class="brand-r">
+      <span class="clock" id="clock" aria-label="현재 시각">--:--:--</span>
+      <button type="button" class="gear" id="gearBtn" aria-label="설정" aria-expanded="false" aria-controls="viewS">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M9.97 4.05L10.17 1.36L13.83 1.36L14.03 4.05A8.2 8.2 0 0 1 16.18 4.95L18.23 3.18L20.82 5.77L19.05 7.82A8.2 8.2 0 0 1 19.95 9.97L22.64 10.17L22.64 13.83L19.95 14.03A8.2 8.2 0 0 1 19.05 16.18L20.82 18.23L18.23 20.82L16.18 19.05A8.2 8.2 0 0 1 14.03 19.95L13.83 22.64L10.17 22.64L9.97 19.95A8.2 8.2 0 0 1 7.82 19.05L5.77 20.82L3.18 18.23L4.95 16.18A8.2 8.2 0 0 1 4.05 14.03L1.36 13.83L1.36 10.17L4.05 9.97A8.2 8.2 0 0 1 4.95 7.82L3.18 5.77L5.77 3.18L7.82 4.95A8.2 8.2 0 0 1 9.97 4.05ZM15.4 12A3.4 3.4 0 1 0 8.6 12A3.4 3.4 0 1 0 15.4 12Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="view" id="viewA">
+    <section class="card" aria-labelledby="h1step">
+      <div class="card-head">
+        <h2 id="h1step"><span class="step">1</span>작업 시각</h2>
+        <div class="seg" role="group" aria-label="근무조">
+          <button type="button" id="shiftDay" aria-pressed="false">주간</button>
+          <button type="button" id="shiftNight" aria-pressed="true">야간</button>
+        </div>
+      </div>
+      <p class="help">휴대폰 시각에 맞춰 이번 라운드를 골라 뒀어요. 라운드가 끝나 <b>라인이 서는 시각</b>까지 계산해요.</p>
+      <div class="chips" id="chips" role="group" aria-label="라운드 선택"></div>
+      <div class="custom" id="customRow" hidden>
+        <label for="customTime">라인이 서는 시각 직접 넣기</label>
+        <input type="time" id="customTime">
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h2step">
+      <h2 id="h2step"><span class="step">2</span>작업차량 설정하기</h2>
+      <p class="help">번호를 설정한 차가 <b>지금 있는 자리</b>에, 라인이 서는 시각에는 <b>미작업 차량</b>이 와요. 그 앞 번호까지 작업하면 돼요.</p>
+      <div class="set-row">
+        <label class="sr" for="carNo">기준으로 정할 차량 번호</label>
+        <input id="carNo" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" enterkeyhint="done">
+        <button type="button" class="btn-primary" id="setBtn">기준 설정</button>
+      </div>
+      <p class="tip">번호를 미리 넣어 두고, 그 차가 자리에 딱 왔을 때 <b>기준 설정</b>을 누르면 가장 정확해요.</p>
+      <p class="err" id="setErr" role="alert"></p>
+      <div class="cur" id="curBox" hidden>
+        <span id="curText"></span>
+        <button type="button" class="link" id="toResult">결과 보기</button>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <p>라인이 잠깐 섰다 가면 결과 화면에서 <b>다시 설정</b>을 누르고, 그때 자리에 있는 차 번호로 다시 맞추세요.</p>
+      <p>회사 시스템과 연결되지 않아요. 설정만 이 폰에 저장되고, 기준 번호는 저장하지 않아요.</p>
+      <p>홈 화면에 추가하면 앱처럼 열리고, 한 번 열어 두면 인터넷이 끊겨도 열려요.</p>
+    </footer>
+  </main>
+
+  <main class="view view-b" id="viewB" hidden>
+    <div class="bbar">
+      <button type="button" class="btn-back" id="backBtn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>다시 설정</button>
+      <span class="bbar-info" id="bInfo"></span>
+    </div>
+
+    <section class="andon" aria-labelledby="h3step">
+      <div class="tape" aria-hidden="true"></div>
+      <div class="andon-in">
+        <h2 id="h3step"><span class="step">3</span>결과</h2>
+        <p class="a-explain" id="aExplain"></p>
+        <div class="a-label" id="aLabel">작업할 마지막 차량</div>
+        <div class="digits"><span class="unlit" aria-hidden="true">8888</span><span class="lit off" id="bigNo">----</span></div>
+        <div class="a-stats">
+          <div><span class="k">남은 작업</span><span class="v" id="sLeft">—</span></div>
+          <div><span class="k">라인 서기까지</span><span class="v" id="sUntil">—</span></div>
+          <div><span class="k">다음 차</span><span class="v" id="sNext">—</span></div>
+        </div>
+        <div class="a-foot" id="aFoot"></div>
+      </div>
+    </section>
+
+    <section class="card scene-card" aria-labelledby="h4step">
+      <div class="card-head">
+        <h2 id="h4step"><span class="step">4</span>라인 모습</h2>
+        <div class="seg" role="group" aria-label="보기">
+          <button type="button" id="viewStop" aria-pressed="true">라인 설 때</button>
+          <button type="button" id="viewNow" aria-pressed="false">지금</button>
+        </div>
+      </div>
+      <div class="scene-box"><svg id="scene" viewBox="0 0 360 176" preserveAspectRatio="xMidYMid meet" role="img" aria-label=""></svg></div>
+      <p class="caption" id="caption"></p>
+    </section>
+  </main>
+
+  <section class="card view-s" id="viewS" aria-labelledby="hS" hidden>
+    <div class="card-head">
+      <h2 id="hS">설정</h2>
+      <button type="button" class="btn-ghost" id="closeS">닫기</button>
+    </div>
+    <div class="set-body" id="setBody">
+      <div class="field">
+        <label for="takt">택트 (차 한 대 간격, 초)</label>
+        <div class="inline"><input type="number" id="takt" inputmode="decimal" step="0.01" min="10" max="600"><span id="uph"></span></div>
+      </div>
+      <fieldset>
+        <legend>주간</legend>
+        <div class="grid2"><label for="start-day">근무 시작<input type="time" id="start-day" data-start="day"></label></div>
+        <div class="grid2" id="rounds-day"></div>
+      </fieldset>
+      <fieldset>
+        <legend>야간</legend>
+        <div class="grid2"><label for="start-night">근무 시작<input type="time" id="start-night" data-start="night"></label></div>
+        <div class="grid2" id="rounds-night"></div>
+      </fieldset>
+      <fieldset>
+        <legend>쉬는 시간 (분, 라인이 서 있는 시간)</legend>
+        <div class="grid3">
+          <label for="brk-0">1R 뒤<input type="number" id="brk-0" data-brk="0" inputmode="numeric" min="0" max="120" step="1"></label>
+          <label for="brk-1">2R 뒤 식사<input type="number" id="brk-1" data-brk="1" inputmode="numeric" min="0" max="120" step="1"></label>
+          <label for="brk-2">3R 뒤<input type="number" id="brk-2" data-brk="2" inputmode="numeric" min="0" max="120" step="1"></label>
+        </div>
+      </fieldset>
+      <p class="note">차량 번호는 9999 다음 0000으로 이어서 계산해요. 근무가 끝나는 4R을 넘어서는 계산하지 않아요.</p>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(function (root) {
+  'use strict';
+  var MAXN = 10000;            // 차량 번호 0000~9999, 9999 다음 0000
+  var HORIZON = 18 * 3600e3;   // 이보다 먼 정지 시각은 '이미 지난 라운드'로 봄
+  var LOOKBACK = 60 * 60e3;    // 라인이 선 뒤 60분까지는 그 라운드 결과를 다시 볼 수 있음
+  var AUTO_GRACE = 5 * 60e3;   // 자동 선택은 라인이 선 뒤 5분까지 그 라운드를 유지
+  var DEFAULT_BREAKS = [10, 40, 10];
+
+  function wrapN(n) { return (Math.round(n) % MAXN + MAXN) % MAXN; }
+  function pad4(n) { return String(n).padStart(4, '0'); }
+  function hm(s) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(s || '');
+    if (!m) return null;
+    var h = +m[1], mi = +m[2];
+    if (h > 23 || mi > 59) return null;
+    return h * 60 + mi;
+  }
+  function fmtMins(mins) {
+    mins = ((mins % 1440) + 1440) % 1440;
+    return String(Math.floor(mins / 60)).padStart(2, '0') + ':' + String(mins % 60).padStart(2, '0');
+  }
+  function at(base, mins, addDays) {
+    var d = new Date(base);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + (addDays || 0), 0, mins).getTime();
+  }
+  // 오늘 그 시각이 60분 넘게 지났으면 내일 그 시각
+  function occ(mins, now) {
+    var t = at(now, mins, 0);
+    if (t < now - LOOKBACK) t = at(now, mins, 1);
+    return t;
+  }
+  function brkMin(st, i) {
+    var b = (st.breaks || DEFAULT_BREAKS)[i];
+    return b > 0 ? +b : 0;
+  }
+
+  // 라운드 시작 시각(표시용): 1R은 근무 시작, 나머지는 앞 라운드 종료 + 쉬는 시간
+  function roundStartHm(st, key, i) {
+    if (i === 0) return (st.starts && st.starts[key]) || null;
+    var prev = hm(st.rounds[key][i - 1]);
+    return prev === null ? null : fmtMins(prev + brkMin(st, i - 1));
+  }
+
+  function roundList(st, key, now) {
+    return (st.rounds[key] || []).map(function (s, i) {
+      var m = hm(s);
+      var startHm = roundStartHm(st, key, i);
+      if (m === null) return { i: i, label: (i + 1) + 'R', hm: s, startHm: startHm, t: null, state: 'invalid' };
+      var t = occ(m, now);
+      var sm = hm(startHm);
+      var len = sm === null ? 0 : ((m - sm + 1440) % 1440) * 60e3;
+      var state = t - now > HORIZON ? 'passed' : (t <= now ? 'stopped' : (len && now >= t - len ? 'running' : 'upcoming'));
+      return { i: i, label: (i + 1) + 'R', hm: s, startHm: startHm, t: t, state: state };
+    });
+  }
+
+  // 가장 가까운 다음 정지 시각(두 조 모두). graceMs: 라인이 선 뒤 이만큼은 그 라운드 유지 (기본 5분, 0이면 다음 라운드)
+  function autoTarget(st, now, onlyShift, graceMs) {
+    var grace = graceMs == null ? AUTO_GRACE : graceMs;
+    var best = null;
+    ['day', 'night'].forEach(function (k) {
+      if (onlyShift && k !== onlyShift) return;
+      roundList(st, k, now).forEach(function (r) {
+        if (r.t === null || r.t - now > HORIZON || r.t <= now - grace) return;
+        if (!best || r.t < best.t) best = { shift: k, i: r.i, t: r.t };
+      });
+    });
+    return best;
+  }
+
+  // t1~t2와 겹치는 쉬는 시간 구간들 (1R·2R·3R 종료 뒤, 두 조 모두)
+  function breaksIn(st, t1, t2) {
+    var list = [];
+    ['day', 'night'].forEach(function (k) {
+      for (var i = 0; i < 3; i++) {
+        var m = hm(st.rounds[k][i]), d = brkMin(st, i);
+        if (m === null || d <= 0) continue;
+        for (var off = -1; off <= 2; off++) {
+          var s = at(t1, m, off), e = s + d * 60e3;
+          if (e > t1 && s < t2) list.push([s, e]);
+        }
+      }
+    });
+    list.sort(function (x, y) { return x[0] - y[0]; });
+    var merged = [];
+    list.forEach(function (iv) {
+      var last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push([iv[0], iv[1]]);
+    });
+    return merged;
+  }
+  // t1~t2 사이 라인 가동 시간(초) = 전체 − 쉬는 시간
+  function runSec(t1, t2, brk) {
+    if (t2 <= t1) return 0;
+    var ms = t2 - t1;
+    brk.forEach(function (iv) {
+      var o = Math.min(iv[1], t2) - Math.max(iv[0], t1);
+      if (o > 0) ms -= o;
+    });
+    return ms / 1000;
+  }
+  function breakSecIn(brk, t1, t2) {
+    return brk.reduce(function (acc, iv) { return acc + Math.max(0, Math.min(iv[1], t2) - Math.max(iv[0], t1)); }, 0) / 1000;
+  }
+
+  function stopsAt(st, t, keys, idxs) {
+    var out = [];
+    keys.forEach(function (k) {
+      idxs.forEach(function (i) {
+        var m = hm(st.rounds[k][i]);
+        if (m === null) return;
+        for (var off = -2; off <= 2; off++) out.push(at(t, m, off));
+      });
+    });
+    return out;
+  }
+  // 근무 끝(4R 종료)이 t1~t2 사이(양끝 제외)에 있는지 → 있으면 기준이 이어지지 않음
+  function shiftEndBetween(st, t1, t2) {
+    return stopsAt(st, t1, ['day', 'night'], [3]).some(function (t) { return t > t1 && t < t2; });
+  }
+  function lastAtOrBefore(list, t) {
+    return list.reduce(function (best, s) { return s <= t && s > best ? s : best; }, -Infinity);
+  }
+  // 같은 라운드(마지막 정지 이후)에 찍은 기준들 — 실측 택트용
+  function roundSyncs(st, t) {
+    var s0 = lastAtOrBefore(stopsAt(st, t, ['day', 'night'], [0, 1, 2, 3]), t);
+    return (st.syncs || []).filter(function (x) { return x.t > s0 && x.t <= t; }).sort(function (a, b) { return a.t - b.t; });
+  }
+  // 같은 근무(마지막 근무 끝 이후)에 찍은 기준들 — 예상 확인용
+  function shiftSyncs(st, t) {
+    var s0 = lastAtOrBefore(stopsAt(st, t, ['day', 'night'], [3]), t);
+    return (st.syncs || []).filter(function (x) { return x.t > s0 && x.t <= t; }).sort(function (a, b) { return a.t - b.t; });
+  }
+
+  function compute(st, now, targetT) {
+    var takt = st.takt > 0 ? st.takt : 72;
+    var r = { takt: takt, target: targetT, stopped: now >= targetT };
+    r.untilStop = Math.max(0, (targetT - now) / 1000);
+    var nb = breaksIn(st, now - 1000, now + 1000);
+    r.inBreak = nb.filter(function (iv) { return now >= iv[0] && now < iv[1]; })[0] || null;
+    var fromNow = breaksIn(st, now, targetT);
+    r.remainRun = runSec(Math.min(now, targetT), targetT, fromNow);
+    r.remainCars = Math.floor(r.remainRun / takt + 1e-9);
+    var all = (st.syncs || []).filter(function (x) { return x.t <= now; }).sort(function (a, b) { return a.t - b.t; });
+    var latest = all[all.length - 1] || null;
+    var usable = latest && latest.t <= targetT && (targetT - latest.t) <= 12 * 3600e3 && !shiftEndBetween(st, latest.t, targetT);
+    if (!usable) {
+      r.sync = null;
+      r.stale = !!latest && (now - latest.t) < 12 * 3600e3;
+      return r;
+    }
+    var sync = latest, t0 = sync.t;
+    var brk = breaksIn(st, t0, targetT);
+    r.breakSec = breakSecIn(brk, t0, targetT);
+    var R = runSec(t0, targetT, brk);
+    var j = Math.floor(R / takt + 1e-9);
+    var lead = R - j * takt;
+    r.sync = sync;
+    r.j = j;
+    r.lead = lead;
+    r.lastCar = wrapN(sync.n + j);
+    r.firstUnworked = wrapN(sync.n + j + 1);
+    // 라인이 설 때 기준점에 걸리는 차(가장 가까운 차) = 미작업 → 그 앞 번호까지 작업
+    var nIdx = lead <= takt / 2 ? j : j + 1;
+    r.refIdx = nIdx;
+    r.refCar = wrapN(sync.n + nIdx);
+    r.refOff = nIdx === j ? lead : -(takt - lead);
+    r.workTo = wrapN(sync.n + nIdx - 1);
+    var rNow = runSec(t0, Math.max(t0, Math.min(now, targetT)), brk);
+    var k = Math.min(j, Math.floor(rNow / takt + 1e-9));
+    r.idxNow = rNow / takt;
+    r.idxStop = R / takt;
+    r.currentCar = wrapN(sync.n + k);
+    r.nextCar = wrapN(sync.n + k + 1);
+    r.nextIn = (k + 1) * takt - rNow;
+    r.workLeft = Math.max(0, nIdx - k);
+    var seg = roundSyncs(st, sync.t);
+    if (seg.length >= 2) {
+      var a = seg[0];
+      var run = runSec(a.t, sync.t, breaksIn(st, a.t, sync.t));
+      var cars = ((sync.n - a.n) % MAXN + MAXN) % MAXN;
+      r.calib = { a: a, b: sync, run: run, cars: cars, takt: (run >= 600 && cars > 0) ? run / cars : null };
+    }
+    return r;
+  }
+
+  // 새 기준을 찍는 순간, 같은 근무의 직전 기준으로 예상했던 차와 시간 오차 (쉬는 시간 빼고)
+  function predictAt(st, now) {
+    var seg = shiftSyncs(st, now);
+    var prev = seg[seg.length - 1];
+    if (!prev) return null;
+    var takt = st.takt > 0 ? st.takt : 72;
+    var run = runSec(prev.t, now, breaksIn(st, prev.t, now));
+    var k = Math.round(run / takt);
+    return { n: wrapN(prev.n + k), offsetSec: run - k * takt };
+  }
+
+  function signedDiff(a, b) {
+    var d = ((a - b) % MAXN + MAXN) % MAXN;
+    if (d > MAXN / 2) d -= MAXN;
+    return d;
+  }
+
+  var api = {
+    MAXN: MAXN, wrapN: wrapN, pad4: pad4, hm: hm, fmtMins: fmtMins, occ: occ, roundList: roundList,
+    roundStartHm: roundStartHm, autoTarget: autoTarget, breaksIn: breaksIn, runSec: runSec,
+    shiftEndBetween: shiftEndBetween, roundSyncs: roundSyncs, compute: compute, predictAt: predictAt, signedDiff: signedDiff
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.TC = api;
+})(typeof window !== 'undefined' ? window : this);
+</script>
+<script>
+(function () {
+  'use strict';
+  var KEY = 'twc.v4';
+  var OLD_KEYS = ['twc.v3', 'twc.v2', 'twc.v1'];
+  var DEFAULT = {
+    takt: 72, custom: '', breaks: [10, 40, 10],
+    starts: { day: '06:45', night: '15:35' },
+    rounds: { day: ['08:50', '11:00', '13:40', '15:30'], night: ['17:40', '19:50', '22:30', '00:20'] }
+  };
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function okHm(s) { return typeof s === 'string' && TC.hm(s) !== null; }
+  // 저장된 값에서 설정만 골라 씀 (예전 기준 기록은 옮기지 않음)
+  function pick(src, s) {
+    if (!src || typeof src !== 'object') return s;
+    if (src.takt >= 10 && src.takt <= 600) s.takt = +src.takt;
+    if (typeof src.custom === 'string' && (src.custom === '' || okHm(src.custom))) s.custom = src.custom;
+    if (Array.isArray(src.breaks) && src.breaks.length === 3 && src.breaks.every(function (b) { return b >= 0 && b <= 120; })) s.breaks = src.breaks.map(Number);
+    ['day', 'night'].forEach(function (k) {
+      if (src.starts && okHm(src.starts[k])) s.starts[k] = src.starts[k];
+      var r = src.rounds && src.rounds[k];
+      if (Array.isArray(r) && r.length === 4 && r.every(okHm)) s.rounds[k] = r.slice();
+    });
+    return s;
+  }
+  function load() {
+    var s = clone(DEFAULT);
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) return pick(JSON.parse(raw), s);
+      for (var i = 0; i < OLD_KEYS.length; i++) {
+        var o = localStorage.getItem(OLD_KEYS[i]);
+        if (o) return pick(JSON.parse(o), s);
+      }
+    } catch (e) {}
+    return s;
+  }
+  var st = load();
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ v: 4, takt: st.takt, custom: st.custom, breaks: st.breaks, starts: st.starts, rounds: st.rounds }));
+    } catch (e) {}
+  }
+  // 예전 버전의 기준 기록은 지우고, 설정만 새 칸에 남김
+  try {
+    if (OLD_KEYS.some(function (k) { return localStorage.getItem(k) !== null; })) {
+      save();
+      OLD_KEYS.forEach(function (k) { localStorage.removeItem(k); });
+    }
+  } catch (e) {}
+
+  var sync = null;   // 기준: { n: 차 번호, t: 기준 설정 시각 } — 이 화면에만, 저장 안 함
+  var lock = null;   // 기준 설정 때 고른 라인 서는 시각: { shift, i } 또는 { custom: true }
+  var first = TC.autoTarget(st, Date.now(), null, 0);
+  var viewShift = first ? first.shift : 'night';
+  var sel = { type: 'auto' };
+  var vizMode = 'stop';
+  var view = 'A', sheet = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+  function two(n) { return String(n).padStart(2, '0'); }
+  function clock(t) { var d = new Date(t); return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds()); }
+  function hhmm(t) { var d = new Date(t); return two(d.getHours()) + ':' + two(d.getMinutes()); }
+  function countdown(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    return h ? h + ':' + two(m) + ':' + two(s) : m + ':' + two(s);
+  }
+  function secText(sec) {
+    sec = Math.max(0, Math.round(sec));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m ? m + '분' + (s ? ' ' + s + '초' : '') : s + '초';
+  }
+  function taktText(t) { return (Math.round(t * 100) / 100) + '초'; }
+  function offPhrase(off) {
+    var a = Math.abs(off);
+    if (Math.round(a) === 0) return '딱 맞춰';
+    return secText(a) + (off > 0 ? ' 넘어서' : ' 덜 와서');
+  }
+  var P4 = function (n) { return TC.pad4(n); };
+  function calcSt() { return { takt: st.takt, breaks: st.breaks, starts: st.starts, rounds: st.rounds, syncs: sync ? [sync] : [] }; }
+
+  // 1번에서 고른 라인 서는 시각 (설정 화면용: 이미 선 라운드는 건너뜀)
+  function resolveTarget(now) {
+    if (sel.type === 'custom') {
+      var m = TC.hm(st.custom);
+      return m === null ? null : { label: '직접', hm: st.custom, t: TC.occ(m, now), custom: true };
+    }
+    var list = TC.roundList(st, viewShift, now);
+    if (sel.type === 'round') {
+      var r = list[sel.i];
+      if (r && r.t !== null && r.state !== 'passed' && r.state !== 'stopped') return { label: r.label, hm: r.hm, t: r.t, i: r.i };
+      sel = { type: 'auto' };
+    }
+    var a = TC.autoTarget(st, now, viewShift, 0);
+    if (!a) return null;
+    return { label: (a.i + 1) + 'R', hm: st.rounds[viewShift][a.i], t: a.t, i: a.i };
+  }
+  // 기준 설정 뒤 결과 화면이 쓰는 라인 서는 시각 (기준 시각 바로 다음의 그 시각)
+  function firstAfter(hmStr, base) {
+    var m = TC.hm(hmStr);
+    if (m === null) return null;
+    var d = new Date(base);
+    var t = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, m).getTime();
+    return t > base ? t : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, m).getTime();
+  }
+  function lockedTarget() {
+    if (!sync || !lock) return null;
+    var hmStr = lock.custom ? st.custom : st.rounds[lock.shift][lock.i];
+    var t = firstAfter(hmStr, sync.t);
+    if (t === null) return null;
+    var name = lock.custom ? '직접 ' + hmStr : (lock.shift === 'day' ? '주간 ' : '야간 ') + (lock.i + 1) + 'R ' + hmStr;
+    return { name: name, hm: hmStr, t: t };
+  }
+
+  function renderChips(now, target) {
+    var box = $('chips');
+    var html = TC.roundList(st, viewShift, now).map(function (r) {
+      var pressed = target && !target.custom && target.i === r.i;
+      var off = r.state === 'passed' || r.state === 'stopped' || r.state === 'invalid';
+      var sub = { running: '진행 중', stopped: '정지됨', passed: '지남' }[r.state] || (r.startHm ? r.startHm + '~' : '');
+      return '<button type="button" class="chip-btn" data-i="' + r.i + '" aria-pressed="' + !!pressed + '"' + (off ? ' disabled' : '') + '>' +
+        '<span class="r">' + r.label + '</span><span class="t">' + (r.hm || '--:--') + '</span><span class="s">' + sub + '</span></button>';
+    }).join('');
+    html += '<button type="button" class="chip-btn" data-custom="1" aria-pressed="' + (sel.type === 'custom') + '">' +
+      '<span class="r">직접</span><span class="t">' + (st.custom || '--:--') + '</span><span class="s"></span></button>';
+    if (box.getAttribute('data-html') !== html) { box.innerHTML = html; box.setAttribute('data-html', html); }
+    $('shiftDay').setAttribute('aria-pressed', String(viewShift === 'day'));
+    $('shiftNight').setAttribute('aria-pressed', String(viewShift === 'night'));
+    $('customRow').hidden = sel.type !== 'custom';
+  }
+
+  // ---- 라인 그림 ----
+  var SV = { W: 360, P: 140, L: 106, xRef: 212, floorY: 128 };
+  function suv(cls, front) {
+    var s = SV.L / 100, x0 = front - SV.L, y0 = SV.floorY - 38.4 * s;
+    return '<g class="car ' + cls + '" transform="translate(' + x0.toFixed(2) + ' ' + y0.toFixed(2) + ') scale(' + s + ')">' +
+      '<path class="body" d="M3,31 L3,19 C3,10 6,7 12,6.5 L58,5.5 C62,5.5 65,6.5 67.5,9 L76,17 L92,19.5 C96.5,20.2 98.5,22.5 98.5,26 L98.5,31 L89.2,31 A9.2,9.2 0 0 0 70.8,31 L29.2,31 A9.2,9.2 0 0 0 10.8,31 Z"/>' +
+      '<path class="win" d="M12.5,9.5 L57,8.6 C59.8,8.6 61.8,9.6 63.8,11.6 L69,16.4 L12.5,16.8 Z"/>' +
+      '<rect class="body" x="30.5" y="8" width="2.4" height="9.6"/><rect class="body" x="47.5" y="8" width="2.4" height="9.6"/>' +
+      '<path class="trim" d="M33.5,18.5 L33.5,29 M50.5,18.5 L50.5,29 M14,4.6 L56,3.9"/>' +
+      '<rect class="lamp-f" x="93.5" y="21" width="4" height="2.6" rx="1"/><rect class="lamp-r" x="3" y="18.5" width="2" height="4.5" rx="0.8"/>' +
+      '<circle class="tire" cx="20" cy="31" r="7.2"/><circle class="hub" cx="20" cy="31" r="3"/>' +
+      '<circle class="tire" cx="80" cy="31" r="7.2"/><circle class="hub" cx="80" cy="31" r="3"/></g>';
+  }
+  function scene(r, mode) {
+    var parts = [];
+    var has = r && r.sync;
+    var idx = has ? (mode === 'now' ? r.idxNow : r.idxStop) : 0.75;
+    var slatOff = ((idx * SV.P) % 14 + 14) % 14;
+    parts.push('<rect class="belt" x="0" y="' + SV.floorY + '" width="' + SV.W + '" height="10" rx="2"/>');
+    for (var x = -14; x < SV.W + 14; x += 14) {
+      var sx = x + slatOff;
+      if (sx >= 0 && sx <= SV.W - 2) parts.push('<rect class="belt-slat" x="' + sx.toFixed(1) + '" y="' + SV.floorY + '" width="2" height="10"/>');
+    }
+    parts.push('<text class="t-lbl" x="6" y="16">진행 방향 →</text>');
+    var j = Math.floor(idx + 1e-9), f = idx - j;
+    var refIdx = f <= 0.5 + 1e-9 ? j : j + 1;
+    var tags = has && (mode === 'stop' || r.stopped);
+    for (var m = refIdx - 3; m <= refIdx + 2; m++) {
+      var front = SV.xRef + (idx - m) * SV.P;
+      if (front < -4 || front - SV.L > SV.W + 4) continue;
+      var kind = m === refIdx ? 'short' : (m === refIdx - 1 ? 'over' : '');
+      parts.push(suv((kind || 'plain') + (has ? '' : ' ghost'), front));
+      var label = has ? P4(TC.wrapN(r.sync.n + m)) : '----';
+      var lx = Math.min(SV.W - 26, Math.max(26, front - SV.L / 2));
+      parts.push('<text class="t-num ' + kind + '" x="' + lx.toFixed(1) + '" y="80" text-anchor="middle">' + label + '</text>');
+      if (tags && kind) {
+        var tgx = Math.min(SV.W - 38, Math.max(38, lx));
+        parts.push('<text class="t-tag ' + kind + '" x="' + tgx.toFixed(1) + '" y="63" text-anchor="middle">' + (kind === 'short' ? '미작업' : '마지막 작업') + '</text>');
+      }
+    }
+    parts.push('<line class="ref-line" x1="' + SV.xRef + '" y1="24" x2="' + SV.xRef + '" y2="146"/>');
+    parts.push('<text class="t-ref" x="' + SV.xRef + '" y="16" text-anchor="middle">기준점</text>');
+    if (has) {
+      var off = (idx - refIdx) * r.takt;
+      var xf = SV.xRef + (idx - refIdx) * SV.P, y = 152;
+      if (Math.abs(off) >= 0.5) {
+        var x1 = Math.min(SV.xRef, xf), x2 = Math.max(SV.xRef, xf);
+        parts.push('<path class="ann short" d="M' + x1.toFixed(1) + ',' + (y - 5) + ' V' + (y + 5) + ' M' + x1.toFixed(1) + ',' + y + ' H' + x2.toFixed(1) + ' M' + x2.toFixed(1) + ',' + (y - 5) + ' V' + (y + 5) + '"/>');
+        var tx = Math.min(SV.W - 30, Math.max(30, (x1 + x2) / 2));
+        parts.push('<text class="t-ann short" x="' + tx.toFixed(1) + '" y="170" text-anchor="middle">' + (off > 0 ? '+' : '−') + Math.round(Math.abs(off)) + '초</text>');
+      }
+    }
+    return parts.join('');
+  }
+
+  // ---- 화면 A: 1 작업 시각 + 2 작업차량 설정하기 ----
+  function renderA(now) {
+    renderChips(now, resolveTarget(now));
+    var lt = lockedTarget();
+    if (lt && now <= lt.t + 3600e3) {
+      $('curText').innerHTML = '지금 기준 <b>' + P4(sync.n) + '</b> · <b>' + clock(sync.t) + '</b> · ' + lt.name;
+      $('curBox').hidden = false;
+    } else {
+      $('curBox').hidden = true;
+    }
+  }
+
+  // ---- 화면 B: 3 결과 + 4 라인 모습 ----
+  function renderB(now) {
+    var target = lockedTarget();
+    if (!target) { show('A', false); return; }
+    $('bInfo').innerHTML = '기준 <b>' + P4(sync.n) + '</b> · <b>' + clock(sync.t) + '</b>';
+    var r = TC.compute(calcSt(), now, target.t);
+    var lit = $('bigNo');
+    $('aLabel').textContent = (r.stopped ? '작업한 마지막 차량 · ' : '작업할 마지막 차량 · ') + target.name;
+    var foot = [];
+    if (r.sync) {
+      $('aExplain').innerHTML = '<b>' + target.hm + '</b>에 라인이 ' + (r.stopped ? '섰을 때' : '서면') + ', <b>' + P4(sync.n) + '</b>번이 있던 자리에 <b class="ref">' +
+        P4(r.refCar) + '</b>번이 ' + (r.stopped ? '왔어요' : '와요') + ' <span class="off">(' + offPhrase(r.refOff) + ' 섬)</span>. 이 차가 <b>미작업 차량</b>이에요.';
+      lit.textContent = P4(r.workTo); lit.className = 'lit';
+      $('sLeft').textContent = r.stopped ? '—' : r.workLeft + '대';
+      $('sNext').textContent = r.stopped ? '—' : (r.inBreak ? '휴식 중' : countdown(r.nextIn));
+      if (r.breakSec > 0) foot.push('<span>쉬는 시간 <b>' + Math.round(r.breakSec / 60) + '분</b> 빼고 계산</span>');
+    } else {
+      $('aExplain').innerHTML = '<span class="chip warn">다시 설정</span> 근무가 끝나는 4R을 넘어가서 계산할 수 없어요. <b>다시 설정</b>을 눌러 이번 근무의 라운드로 맞춰 주세요.';
+      lit.textContent = '----'; lit.className = 'lit off';
+      $('sLeft').textContent = '—';
+      $('sNext').textContent = '—';
+    }
+    $('sUntil').textContent = r.stopped ? '섰음' : countdown(r.untilStop);
+    if (r.inBreak) foot.push('<span>쉬는 중 · <b>' + hhmm(r.inBreak[1]) + '</b> 재가동</span>');
+    foot.push('<span>택트 <b>' + taktText(r.takt) + '</b></span>');
+    $('aFoot').innerHTML = foot.join('');
+
+    $('scene').innerHTML = scene(r, vizMode);
+    if (!r.sync) {
+      $('caption').textContent = '다시 설정하면 라인이 설 때 모습이 나와요.';
+    } else if (vizMode === 'stop' || r.stopped) {
+      $('caption').innerHTML = target.hm + '에 라인이 서면 기준점에 <b class="short">' + P4(r.refCar) + '</b>번(미작업)이 ' + offPhrase(r.refOff) +
+        ' 서요. <b class="over">' + P4(r.workTo) + '</b>번까지 작업하면 돼요.';
+    } else if (r.inBreak) {
+      $('caption').innerHTML = '지금은 쉬는 시간이에요. <b>' + hhmm(r.inBreak[1]) + '</b>에 라인이 다시 움직여요.';
+    } else {
+      var since = (r.idxNow - Math.floor(r.idxNow + 1e-9)) * r.takt;
+      $('caption').innerHTML = '지금 <b class="over">' + P4(r.currentCar) + '</b>번이 기준점을 ' + secText(since) + ' 지났고, <b class="short">' +
+        P4(r.nextCar) + '</b>번은 ' + secText(r.nextIn) + ' 뒤에 들어와요.';
+    }
+    $('scene').setAttribute('aria-label', $('caption').textContent);
+  }
+
+  function render() {
+    var now = Date.now();
+    $('clock').textContent = clock(now);
+    if (sheet) return;
+    if (view === 'B') renderB(now); else renderA(now);
+  }
+
+  // ---- 화면 바꾸기: 휴대폰 뒤로 가기로도 돌아오게 기록을 남김 ----
+  function show(v, s) {
+    if (v === 'B' && !lockedTarget()) v = 'A';
+    var changed = v !== view || s !== sheet;
+    view = v; sheet = s;
+    $('viewA').hidden = s || v !== 'A';
+    $('viewB').hidden = s || v !== 'B';
+    $('viewS').hidden = !s;
+    document.body.classList.toggle('is-b', !s && v === 'B');
+    $('gearBtn').setAttribute('aria-expanded', String(s));
+    $('gearBtn').setAttribute('aria-label', s ? '설정 닫기' : '설정');
+    if (changed) window.scrollTo(0, 0);
+    render();
+  }
+  function go(v, s) {
+    try { history.pushState({ v: v, s: s }, ''); } catch (e) {}
+    show(v, s);
+  }
+  window.addEventListener('popstate', function (e) {
+    var x = e.state || {};
+    show(x.v === 'B' ? 'B' : 'A', !!x.s);
+  });
+  function closeSheet() {
+    var x = history.state;
+    if (x && x.s) history.back(); else show(view, false);
+  }
+
+  function renderSettings() {
+    $('takt').value = Math.round(st.takt * 100) / 100;
+    ['day', 'night'].forEach(function (k) {
+      $('start-' + k).value = st.starts[k] || '';
+      $('rounds-' + k).innerHTML = st.rounds[k].map(function (v, i) {
+        var id = 'round-' + k + '-' + i;
+        return '<label for="' + id + '">' + (i + 1) + 'R 끝 (라인 섬)<input type="time" id="' + id + '" data-k="' + k + '" data-i="' + i + '" value="' + (v || '') + '"></label>';
+      }).join('');
+    });
+    for (var i = 0; i < 3; i++) $('brk-' + i).value = st.breaks[i];
+    $('customTime').value = st.custom || '';
+    $('uph').textContent = '시간당 ' + (3600 / st.takt).toFixed(1) + '대';
+  }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 2200);
+  }
+  function setErr(msg) { $('setErr').textContent = msg; }
+
+  $('gearBtn').addEventListener('click', function () { if (sheet) closeSheet(); else go(view, true); });
+  $('closeS').addEventListener('click', closeSheet);
+  $('backBtn').addEventListener('click', function () {
+    var x = history.state;
+    if (x && x.v === 'B' && !x.s) history.back(); else show('A', false);
+  });
+  $('toResult').addEventListener('click', function () { go('B', false); });
+
+  $('chips').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    setErr('');
+    if (b.dataset.custom) { sel = { type: 'custom' }; render(); $('customTime').focus(); }
+    else { sel = { type: 'round', i: +b.dataset.i }; render(); }
+  });
+  $('customTime').addEventListener('change', function () {
+    if (TC.hm(this.value) !== null) { st.custom = this.value; save(); setErr(''); render(); }
+  });
+  $('shiftDay').addEventListener('click', function () { viewShift = 'day'; sel = { type: 'auto' }; setErr(''); render(); });
+  $('shiftNight').addEventListener('click', function () { viewShift = 'night'; sel = { type: 'auto' }; setErr(''); render(); });
+  $('viewStop').addEventListener('click', function () { vizMode = 'stop'; this.setAttribute('aria-pressed', 'true'); $('viewNow').setAttribute('aria-pressed', 'false'); render(); });
+  $('viewNow').addEventListener('click', function () { vizMode = 'now'; this.setAttribute('aria-pressed', 'true'); $('viewStop').setAttribute('aria-pressed', 'false'); render(); });
+
+  $('carNo').addEventListener('input', function () {
+    var v = this.value.replace(/\D/g, '').slice(0, 4);
+    if (v !== this.value) this.value = v;
+    setErr('');
+  });
+  // 키보드의 완료/엔터는 키보드만 닫음 (기준은 차가 자리에 왔을 때 버튼으로)
+  $('carNo').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); this.blur(); } });
+  $('setBtn').addEventListener('click', function () {
+    var raw = $('carNo').value;
+    var n = parseInt(raw, 10);
+    if (raw === '' || !(n >= 0 && n <= 9999)) {
+      setErr('0000~9999 사이 차량 번호를 넣어 주세요.');
+      $('carNo').focus();
+      return;
+    }
+    var now = Date.now();
+    var target = resolveTarget(now);
+    if (!target) { setErr(sel.type === 'custom' ? '1번에서 라인이 서는 시각을 넣어 주세요.' : '1번에서 라운드를 골라 주세요.'); return; }
+    if (target.t <= now) { setErr('이미 지난 시각이에요. 1번에서 다음 라운드를 골라 주세요.'); return; }
+    if (target.t - now > 12 * 3600e3 || TC.shiftEndBetween(st, now, target.t)) {
+      setErr('근무가 끝나는 4R을 넘어서는 계산할 수 없어요. 1번에서 이번 근무의 라운드를 골라 주세요.');
+      return;
+    }
+    sync = { n: n, t: now };
+    lock = target.custom ? { custom: true } : { shift: viewShift, i: target.i };
+    $('carNo').value = '';
+    $('carNo').blur();
+    setErr('');
+    go('B', false);
+    countEvent('sync', '기준 설정');
+  });
+
+  $('setBody').addEventListener('change', function (e) {
+    var el = e.target;
+    if (el.id === 'takt') {
+      var v = parseFloat(el.value);
+      if (v >= 10 && v <= 600) st.takt = Math.round(v * 100) / 100;
+      else { el.value = st.takt; toast('택트는 10~600초 사이로 넣어 주세요'); return; }
+    } else if (el.dataset && el.dataset.start) {
+      if (TC.hm(el.value) === null) { el.value = st.starts[el.dataset.start]; return; }
+      st.starts[el.dataset.start] = el.value;
+    } else if (el.dataset && el.dataset.k) {
+      if (TC.hm(el.value) === null) { el.value = st.rounds[el.dataset.k][+el.dataset.i]; return; }
+      st.rounds[el.dataset.k][+el.dataset.i] = el.value;
+    } else if (el.dataset && el.dataset.brk !== undefined) {
+      var b = parseInt(el.value, 10);
+      if (b >= 0 && b <= 120) st.breaks[+el.dataset.brk] = b;
+      else { el.value = st.breaks[+el.dataset.brk]; toast('쉬는 시간은 0~120분 사이로 넣어 주세요'); return; }
+    } else {
+      return;
+    }
+    save();
+    $('uph').textContent = '시간당 ' + (3600 / st.takt).toFixed(1) + '대';
+    toast('저장했어요');
+  });
+
+  // ---- 익명 사용 집계: 공개 사이트 빌드에서만 켜짐. 열린 횟수와 '기준 설정' 횟수만 보내고, 이름·번호는 안 보냄 ----
+  var COUNTER = '';
+  var counting = false;
+  function startCounter() {
+    if (!/^https:\/\/[a-z0-9-]+\.goatcounter\.com\/count$/.test(COUNTER)) return;
+    var off = false;
+    try {
+      var h = location.hash;
+      if (h === '#nocount' || h === '#count') {
+        localStorage.setItem('twc.nocount', h === '#nocount' ? '1' : '0');
+        history.replaceState(history.state, '', location.pathname + location.search);
+        toast(h === '#nocount' ? '이 폰은 사용 집계에서 뺐어요' : '이 폰도 다시 집계해요');
+      }
+      off = localStorage.getItem('twc.nocount') === '1';
+    } catch (e) {}
+    if (off) return;
+    counting = true;
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://gc.zgo.at/count.js';
+    s.setAttribute('data-goatcounter', COUNTER);
+    document.head.appendChild(s);
+  }
+  function countEvent(path, title) {
+    if (!counting) return;
+    try {
+      if (window.goatcounter && typeof window.goatcounter.count === 'function') window.goatcounter.count({ path: path, title: title, event: true });
+    } catch (e) {}
+  }
+
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) render(); });
+  try { history.replaceState({ v: 'A', s: false }, ''); } catch (e) {}
+  renderSettings();
+  show('A', false);
+  setInterval(render, 250);
+  startCounter();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+}
+</script>
+</body>
+</html>
