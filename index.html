@@ -359,13 +359,13 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
 
     <section class="card" aria-labelledby="h2step">
       <h2 id="h2step"><span class="step">2</span>작업차량 설정하기</h2>
-      <p class="help">번호를 설정한 차가 <b>지금 있는 자리</b>에, 라인이 서는 시각에는 <b>미작업 차량</b>이 와요. 그 앞 번호까지 작업하면 돼요.</p>
+      <p class="help">번호를 설정한 차가 <b>지금 있는 자리(기준점)</b>에, 라인이 서는 시각에는 <b>미작업 차량</b>이 와요. 그 앞 번호까지 작업하면 돼요.</p>
       <div class="set-row">
         <label class="sr" for="carNo">기준으로 정할 차량 번호</label>
         <input id="carNo" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" enterkeyhint="done">
         <button type="button" class="btn-primary" id="setBtn">기준 설정</button>
       </div>
-      <p class="tip">번호를 미리 넣어 두고, 그 차가 자리에 딱 왔을 때 <b>기준 설정</b>을 누르면 가장 정확해요.</p>
+      <p class="tip">번호를 미리 넣어 두고, 차가 기준점에 올 때 <b>기준 설정</b>을 누르세요. 매번 같은 곳으로 맞춰야 정확해요.</p>
       <p class="err" id="setErr" role="alert"></p>
       <div class="cur" id="curBox" hidden>
         <span id="curText"></span>
@@ -374,7 +374,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
     </section>
 
     <footer class="foot">
-      <p>라인이 잠깐 섰다 가면 결과 화면에서 <b>다시 설정</b>을 누르고, 그때 자리에 있는 차 번호로 다시 맞추세요.</p>
+      <p>라인이 잠깐 섰다 가면 결과 화면에서 <b>다시 설정</b>을 누르고, 그때 기준점에 오는 차 번호로 다시 맞추세요.</p>
       <p>회사 시스템과 연결되지 않아요. 설정만 이 폰에 저장되고, 기준 번호는 저장하지 않아요.</p>
       <p>홈 화면에 추가하면 앱처럼 열리고, 한 번 열어 두면 인터넷이 끊겨도 열려요.</p>
     </footer>
