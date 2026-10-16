@@ -375,6 +375,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
 
     <footer class="foot">
       <p>라인이 잠깐 섰다 가면 결과 화면에서 <b>다시 설정</b>을 누르고, 그때 기준점에 오는 차 번호로 다시 맞추세요.</p>
+      <p>근무 시작 전이나 쉬는 시간처럼 라인이 서 있을 때 누르면, 라인이 다시 움직이는 시각부터 계산해요.</p>
       <p>회사 시스템과 연결되지 않아요. 설정만 이 폰에 저장되고, 기준 번호는 저장하지 않아요.</p>
       <p>홈 화면에 추가하면 앱처럼 열리고, 한 번 열어 두면 인터넷이 끊겨도 열려요.</p>
     </footer>
@@ -443,7 +444,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
           <label for="brk-2">3R 뒤<input type="number" id="brk-2" data-brk="2" inputmode="numeric" min="0" max="120" step="1"></label>
         </div>
       </fieldset>
-      <p class="note">차량 번호는 9999 다음 0000으로 이어서 계산해요. 근무가 끝나는 4R을 넘어서는 계산하지 않아요.</p>
+      <p class="note">차량 번호는 9999 다음 0000으로 이어서 계산해요. 근무가 끝나는 4R을 넘어서는 계산하지 않아요. 앞 근무가 끝나고 다음 근무가 시작하기 전(예: 15:30~15:35)은 라인이 서 있는 시간으로 빼요.</p>
     </div>
   </section>
 </div>
@@ -534,6 +535,9 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
         }
       }
     });
+    return mergeIv(list);
+  }
+  function mergeIv(list) {
     list.sort(function (x, y) { return x[0] - y[0]; });
     var merged = [];
     list.forEach(function (iv) {
@@ -542,6 +546,30 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
       else merged.push([iv[0], iv[1]]);
     });
     return merged;
+  }
+  // t1~t2와 겹치는 근무 사이 정지 구간: 앞 근무 끝(4R) → 다음 근무 시작
+  // (주간 끝 15:30 → 야간 시작 15:35, 야간 끝 00:20 → 주간 시작 06:45. 10-16 본인: 15:30~15:35는 라인이 멈춤)
+  function gapsIn(st, t1, t2) {
+    var list = [];
+    [['day', 'night'], ['night', 'day']].forEach(function (p) {
+      var endM = hm(st.rounds[p[0]] && st.rounds[p[0]][3]);
+      var startM = hm(st.starts && st.starts[p[1]]);
+      if (endM === null || startM === null) return;
+      var d = (startM - endM + 1440) % 1440;
+      if (d <= 0 || d >= 720) return;
+      for (var off = -1; off <= 2; off++) {
+        var s = at(t1, endM, off), e = s + d * 60e3;
+        if (e > t1 && s < t2) list.push([s, e]);
+      }
+    });
+    return mergeIv(list);
+  }
+  // 라인이 서 있는 구간 전부 = 쉬는 시간 + 근무 사이
+  function stopsIn(st, t1, t2) {
+    return mergeIv(breaksIn(st, t1, t2).concat(gapsIn(st, t1, t2)));
+  }
+  function stopAt(list, t) {
+    return list.filter(function (iv) { return t >= iv[0] && t < iv[1]; })[0] || null;
   }
   // t1~t2 사이 라인 가동 시간(초) = 전체 − 쉬는 시간
   function runSec(t1, t2, brk) {
@@ -590,9 +618,10 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
     var takt = st.takt > 0 ? st.takt : DEFAULT_TAKT;
     var r = { takt: takt, target: targetT, stopped: now >= targetT };
     r.untilStop = Math.max(0, (targetT - now) / 1000);
-    var nb = breaksIn(st, now - 1000, now + 1000);
-    r.inBreak = nb.filter(function (iv) { return now >= iv[0] && now < iv[1]; })[0] || null;
-    var fromNow = breaksIn(st, now, targetT);
+    // 지금 라인이 서 있는 구간(쉬는 시간 또는 근무 사이). inGap: 근무 사이(근무 시작 전)
+    r.inBreak = stopAt(stopsIn(st, now - 1000, now + 1000), now);
+    r.inGap = !!stopAt(gapsIn(st, now - 1000, now + 1000), now);
+    var fromNow = stopsIn(st, now, targetT);
     r.remainRun = runSec(Math.min(now, targetT), targetT, fromNow);
     r.remainCars = Math.floor(r.remainRun / takt + 1e-9);
     var all = (st.syncs || []).filter(function (x) { return x.t <= now; }).sort(function (a, b) { return a.t - b.t; });
@@ -604,8 +633,11 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
       return r;
     }
     var sync = latest, t0 = sync.t;
-    var brk = breaksIn(st, t0, targetT);
-    r.breakSec = breakSecIn(brk, t0, targetT);
+    var brk = stopsIn(st, t0, targetT);
+    r.breakSec = breakSecIn(breaksIn(st, t0, targetT), t0, targetT);
+    // 라인이 서 있을 때 잡은 기준이면 다시 움직이는 시각부터 계산 (그 시각)
+    var s0 = stopAt(stopsIn(st, t0 - 1000, t0 + 1000), t0);
+    r.syncStart = s0 ? s0[1] : null;
     var R = runSec(t0, targetT, brk);
     var j = Math.floor(R / takt + 1e-9);
     var lead = R - j * takt;
@@ -631,7 +663,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
     var seg = roundSyncs(st, sync.t);
     if (seg.length >= 2) {
       var a = seg[0];
-      var run = runSec(a.t, sync.t, breaksIn(st, a.t, sync.t));
+      var run = runSec(a.t, sync.t, stopsIn(st, a.t, sync.t));
       var cars = ((sync.n - a.n) % MAXN + MAXN) % MAXN;
       r.calib = { a: a, b: sync, run: run, cars: cars, takt: (run >= 600 && cars > 0) ? run / cars : null };
     }
@@ -644,7 +676,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
     var prev = seg[seg.length - 1];
     if (!prev) return null;
     var takt = st.takt > 0 ? st.takt : DEFAULT_TAKT;
-    var run = runSec(prev.t, now, breaksIn(st, prev.t, now));
+    var run = runSec(prev.t, now, stopsIn(st, prev.t, now));
     var k = Math.round(run / takt);
     return { n: wrapN(prev.n + k), offsetSec: run - k * takt };
   }
@@ -657,7 +689,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
 
   var api = {
     MAXN: MAXN, DEFAULT_TAKT: DEFAULT_TAKT, wrapN: wrapN, pad4: pad4, hm: hm, fmtMins: fmtMins, occ: occ, roundList: roundList,
-    roundStartHm: roundStartHm, autoTarget: autoTarget, breaksIn: breaksIn, runSec: runSec,
+    roundStartHm: roundStartHm, autoTarget: autoTarget, breaksIn: breaksIn, gapsIn: gapsIn, stopsIn: stopsIn, runSec: runSec,
     shiftEndBetween: shiftEndBetween, roundSyncs: roundSyncs, compute: compute, predictAt: predictAt, signedDiff: signedDiff
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -868,8 +900,10 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
   function renderB(now) {
     var target = lockedTarget();
     if (!target) { show('A', false); return; }
-    $('bInfo').innerHTML = '기준 <b>' + P4(sync.n) + '</b> · <b>' + clock(sync.t) + '</b>';
     var r = TC.compute(calcSt(), now, target.t);
+    // 라인이 서 있을 때(근무 시작 전·쉬는 시간) 잡은 기준이면 다시 움직이는 시각부터 계산했다고 알려 줌
+    $('bInfo').innerHTML = '기준 <b>' + P4(sync.n) + '</b> · <b>' + clock(sync.t) + '</b>' +
+      (r.sync && r.syncStart ? '<br>라인 정지 중 → <b>' + hhmm(r.syncStart) + '</b>부터 계산' : '');
     var lit = $('bigNo');
     $('aLabel').textContent = (r.stopped ? '작업한 마지막 차량 · ' : '작업할 마지막 차량 · ') + target.name;
     var foot = [];
@@ -878,7 +912,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
         P4(r.refCar) + '</b>번이 ' + (r.stopped ? '왔어요' : '와요') + ' <span class="off">(' + offPhrase(r.refOff) + ' 섬)</span>. 이 차가 <b>미작업 차량</b>이에요.';
       lit.textContent = P4(r.workTo); lit.className = 'lit';
       $('sLeft').textContent = r.stopped ? '—' : r.workLeft + '대';
-      $('sNext').textContent = r.stopped ? '—' : (r.inBreak ? '휴식 중' : countdown(r.nextIn));
+      $('sNext').textContent = r.stopped ? '—' : (r.inBreak ? (r.inGap ? '출발 전' : '휴식 중') : countdown(r.nextIn));
       if (r.breakSec > 0) foot.push('<span>쉬는 시간 <b>' + Math.round(r.breakSec / 60) + '분</b> 빼고 계산</span>');
     } else {
       $('aExplain').innerHTML = '<span class="chip warn">다시 설정</span> 근무가 끝나는 4R을 넘어가서 계산할 수 없어요. <b>다시 설정</b>을 눌러 이번 근무의 라운드로 맞춰 주세요.';
@@ -887,7 +921,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
       $('sNext').textContent = '—';
     }
     $('sUntil').textContent = r.stopped ? '섰음' : countdown(r.untilStop);
-    if (r.inBreak) foot.push('<span>쉬는 중 · <b>' + hhmm(r.inBreak[1]) + '</b> 재가동</span>');
+    if (r.inBreak) foot.push('<span>' + (r.inGap ? '근무 시작 전' : '쉬는 중') + ' · <b>' + hhmm(r.inBreak[1]) + '</b> ' + (r.inGap ? '출발' : '재가동') + '</span>');
     foot.push('<span>택트 <b>' + taktText(r.takt) + '</b></span>');
     $('aFoot').innerHTML = foot.join('');
 
@@ -898,7 +932,8 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
       $('caption').innerHTML = target.hm + '에 라인이 서면 기준점에 <b class="short">' + P4(r.refCar) + '</b>번(미작업)이 ' + offPhrase(r.refOff) +
         ' 서요. <b class="over">' + P4(r.workTo) + '</b>번까지 작업하면 돼요.';
     } else if (r.inBreak) {
-      $('caption').innerHTML = '지금은 쉬는 시간이에요. <b>' + hhmm(r.inBreak[1]) + '</b>에 라인이 다시 움직여요.';
+      $('caption').innerHTML = r.inGap ? '지금은 근무 시작 전이라 라인이 서 있어요. <b>' + hhmm(r.inBreak[1]) + '</b>에 출발해요.' :
+        '지금은 쉬는 시간이에요. <b>' + hhmm(r.inBreak[1]) + '</b>에 라인이 다시 움직여요.';
     } else {
       var since = (r.idxNow - Math.floor(r.idxNow + 1e-9)) * r.takt;
       $('caption').innerHTML = '지금 <b class="over">' + P4(r.currentCar) + '</b>번이 기준점을 ' + secText(since) + ' 지났고, <b class="short">' +
