@@ -458,7 +458,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
   var LOOKBACK = 60 * 60e3;    // 라인이 선 뒤 60분까지는 그 라운드 결과를 다시 볼 수 있음
   var AUTO_GRACE = 5 * 60e3;   // 자동 선택은 라인이 선 뒤 5분까지 그 라운드를 유지
   var DEFAULT_BREAKS = [10, 40, 10];
-  var DEFAULT_TAKT = 71.6;     // 차 한 대 간격(초). 10-15 라인 영상으로 잼(71.59~71.60초). 처음엔 72초로 시작
+  var DEFAULT_TAKT = 71.39;    // 차 한 대 간격(초). 10-16 야간 실측: 0806 20:30:13 → 0852 21:24:57 → 0898 22:19:41 (46대씩 3,284초). 그 전 71.6초(10-15 영상 1대 간격), 처음엔 72초
 
   function wrapN(n) { return (Math.round(n) % MAXN + MAXN) % MAXN; }
   function pad4(n) { return String(n).padStart(4, '0'); }
@@ -711,8 +711,10 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
   // 저장된 값에서 설정만 골라 씀 (예전 기준 기록은 옮기지 않음)
   function pick(src, s) {
     if (!src || typeof src !== 'object') return s;
-    // 예전 기본값 72초가 그대로 저장된 폰(v5 이전)은 새 기본값으로 옮김. 직접 바꾼 값은 그대로 둠
-    if (src.takt >= 10 && src.takt <= 600 && !(src.v !== 5 && +src.takt === 72)) s.takt = +src.takt;
+    // 예전 기본값이 그대로 저장된 폰은 새 기본값으로 옮김: 72초(v5 이전), 71.6초(v6 이전). 직접 바꾼 값은 그대로 둠
+    var ver = +src.v || 0;
+    var oldDefault = (ver < 5 && +src.takt === 72) || (ver < 6 && +src.takt === 71.6);
+    if (src.takt >= 10 && src.takt <= 600 && !oldDefault) s.takt = +src.takt;
     if (typeof src.custom === 'string' && (src.custom === '' || okHm(src.custom))) s.custom = src.custom;
     if (Array.isArray(src.breaks) && src.breaks.length === 3 && src.breaks.every(function (b) { return b >= 0 && b <= 120; })) s.breaks = src.breaks.map(Number);
     ['day', 'night'].forEach(function (k) {
@@ -737,7 +739,7 @@ body.is-b { padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); }
   var st = load();
   function save() {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ v: 5, takt: st.takt, custom: st.custom, breaks: st.breaks, starts: st.starts, rounds: st.rounds }));
+      localStorage.setItem(KEY, JSON.stringify({ v: 6, takt: st.takt, custom: st.custom, breaks: st.breaks, starts: st.starts, rounds: st.rounds }));
     } catch (e) {}
   }
   // 예전 버전의 기준 기록은 지우고, 설정만 새 칸에 남김

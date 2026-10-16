@@ -1,6 +1,6 @@
 // 작업 차량 계산기 — 오프라인용 서비스 워커
 // 같은 주소의 파일만 저장해 두고: 저장본을 먼저 보여주고, 그사이 새 버전을 받아 다음에 열 때 씀
-var CACHE = 'twc-site-fd2507a6';
+var CACHE = 'twc-site-81610234';
 var SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
