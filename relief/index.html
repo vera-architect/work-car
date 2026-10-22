@@ -468,6 +468,16 @@ html.drag-on,html.drag-on *{cursor:grabbing!important;-webkit-user-select:none;u
 .rnum small{display:block;font-family:var(--font-ui);font-size:11px;font-weight:700;line-height:1.15}
 .rrow.off{opacity:.75}
 @media (max-width:350px){.wtag{font-size:9px;padding:1px 2px}}
+/* v6.1: 릴리프 인원 적용 */
+.applybar{border:2px solid var(--accent-line);background:var(--accent-bg);border-radius:6px;padding:10px 12px;display:grid;gap:8px;font-size:14px}
+.applybar p{margin:0;line-height:1.5}
+.btn.lit{background:var(--accent);border-color:var(--accent-line);color:var(--on-accent);font-weight:700;box-shadow:0 0 0 3px var(--accent-bg)}
+@media (prefers-reduced-motion:no-preference){.btn.lit{animation:litpulse 1.6s ease-in-out infinite}}
+@keyframes litpulse{50%{box-shadow:0 0 0 6px var(--accent-bg)}}
+.rrow.new{border-style:dashed;border-color:var(--accent-line);background:var(--accent-bg)}
+.rrow.new .rnum{font-weight:700}
+.rrow.gone{opacity:.6}
+.rrow.gone .rname b{text-decoration:line-through}
 /* v6: 순번 줄 끌기 · 원 그림 끌기 */
 .tchip[data-drag],.ring g[data-drag]{cursor:grab}
 .tchip.add{border-style:dashed}
@@ -606,7 +616,7 @@ function cleanBase(b) {
   people.forEach(p => { if (p.home && (!seatIds.has(p.home) || seatedIds.has(p.id))) delete p.home; });
   const ids = new Set(people.map(p => p.id));
   const byName = n => (people.find(p => p.name === n) || {}).id || null;
-  let turn = b.turn && typeof b.turn === 'object' && isDate(b.turn.date) && ids.has(b.turn.pid) ? { date: b.turn.date, pid: b.turn.pid } : null;
+  let turn = b.turn && typeof b.turn === 'object' && isDate(b.turn.date) && ids.has(b.turn.pid) ? Object.assign({ date: b.turn.date, pid: b.turn.pid }, b.turn.exact ? { exact: true } : {}) : null;
   if (!turn && old && DEFAULTS && DEFAULTS.turn && byName(DEFAULTS.turn[1])) turn = { date: DEFAULTS.turn[0], pid: byName(DEFAULTS.turn[1]) };
   let backup = typeof b.backup === 'string' && ids.has(b.backup) ? b.backup : null;
   if (old && !backup && DEFAULTS && DEFAULTS.backup) backup = byName(DEFAULTS.backup);
@@ -664,7 +674,7 @@ function purge() {
     const T = turnCache();
     if (T.first && T.first < cutoff && (!base.turn || base.turn.date < cutoff)) {
       const o = ownerAt(cutoff);
-      if (o && o.owner) { base.turn = { date: cutoff, pid: o.owner }; saveBase(); }
+      if (o && o.owner) { base.turn = { date: cutoff, pid: o.owner, exact: true }; saveBase(); } // 다 센 값이라 그날 그대로(exact)
     }
     old.forEach(k => { delete days[k]; });
   }
@@ -677,6 +687,19 @@ function reliefIdsFor(d) {
   const seen = new Set();
   return src.filter(id => P.has(id) && !seen.has(id) && seen.add(id));
 }
+// 적용 전(바꿔 둔) 릴리프 명단 days[날짜].pend. 없으면 지금 적용된 명단
+function pendIdsFor(d) {
+  if (!d || !Array.isArray(d.pend)) return reliefIdsFor(d);
+  const seen = new Set();
+  return d.pend.filter(id => P.has(id) && !seen.has(id) && seen.add(id));
+}
+const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
+function pendDiff(d) {
+  const now = reliefIdsFor(d), next = pendIdsFor(d);
+  return { now, next, add: next.filter(id => !now.includes(id)), del: now.filter(id => !next.includes(id)) };
+}
+// 업무 중(오늘 2R~4R)이면 그 라운드, 아니면 0
+const midRound = k => { if (k !== workDayKey()) return 0; const r = curRound(k); return r >= 2 && r <= 4 ? r : 0; };
 function editDay(fn, opts) {
   const k = ui.date;
   const d = days[k] || { notes: {} };
@@ -684,6 +707,7 @@ function editDay(fn, opts) {
   if (opts && opts.cond) snapPlan(k, d);
   fn(d);
   if (Array.isArray(d.reliefs) && sameArr(reliefIdsFor(d), defaultReliefIds())) delete d.reliefs;
+  if (d.pend !== undefined && (!Array.isArray(d.pend) || sameSet(pendIdsFor(d), reliefIdsFor(d)))) delete d.pend;
   if (d.starts && !Object.keys(d.starts).length) delete d.starts;
   if (d.fills && (typeof d.fills !== 'object' || !Object.keys(d.fills).length)) delete d.fills;
   if (d.swaps && (typeof d.swaps !== 'object' || !Object.values(d.swaps).some(a => Array.isArray(a) && a.length))) delete d.swaps;
@@ -691,7 +715,7 @@ function editDay(fn, opts) {
   delete d.kstart; // v5 '오늘만 키퍼'는 v6부터 그날 차례(turn)로 친다
   if (d.ring !== undefined && (!Array.isArray(d.ring) || !d.ring.length)) delete d.ring;
   if (!d.turn) delete d.turn;
-  const empty = !Object.keys(d.notes).length && !Array.isArray(d.reliefs) && !d.starts && !d.turn && !d.fills && !d.swaps && !d.plan && !d.sent && !d.work && !d.ring;
+  const empty = !Object.keys(d.notes).length && !Array.isArray(d.reliefs) && !Array.isArray(d.pend) && !d.starts && !d.turn && !d.fills && !d.swaps && !d.plan && !d.sent && !d.work && !d.ring;
   if (empty) delete days[k]; else { d.t = Date.now(); days[k] = d; }
   saveDays();
 }
@@ -818,7 +842,7 @@ let TC = { ver: -1 };
 function turnCache() {
   if (TC.ver === DATA_VER) return TC;
   const isKey = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
-  const baseAt = base.turn && isKey(base.turn.date) && P.has(base.turn.pid) ? { date: base.turn.date, pid: base.turn.pid } : null;
+  const baseAt = base.turn && isKey(base.turn.date) && P.has(base.turn.pid) ? { date: base.turn.date, pid: base.turn.pid, exact: !!base.turn.exact } : null;
   const dayAt = new Map();
   for (const [dk, d] of Object.entries(days)) if (isKey(dk) && d && d.turn && P.has(d.turn)) dayAt.set(dk, d.turn);
   const dates = [...dayAt.keys()];
@@ -857,7 +881,11 @@ function ownerAt(k) {
   const cont = T.last && T.last < k;
   let j = cont ? addDays(T.last, 1) : T.first, prev = cont ? T.own.get(T.last).owner : null, guard = 0;
   for (; j <= k && guard++ < 4000; j = addDays(j, 1)) {
-    const auto = T.baseAt && T.baseAt.date === j ? T.baseAt.pid : prev === null ? null : isWorkDay(j) ? nextIn(T, turnList(j), prev) : prev;
+    // 기본 기준(기본값·명단 코드): '그날 X 차례'를 '전 근무일은 X 바로 위 사람'으로 보고 그날은 규칙대로 센다.
+    // → 그날 들어온 사람이 있으면 그 사람 차례가 될 수 있다. (40일 지우며 옮긴 기준은 다 센 값이라 그대로)
+    const auto = T.baseAt && T.baseAt.date === j
+      ? (T.baseAt.exact || !isWorkDay(j) ? T.baseAt.pid : nextIn(T, turnList(j), prevIn(T, base.people.filter(p => p.role === '릴리프' || p.id === T.baseAt.pid).map(p => p.id), T.baseAt.pid)))
+      : prev === null ? null : isWorkDay(j) ? nextIn(T, turnList(j), prev) : prev;
     const owner = T.dayAt.get(j) || auto;
     T.own.set(j, { owner, auto });
     T.last = j; prev = owner;
@@ -1049,6 +1077,7 @@ function compute(k = ui.date) {
   // 라운드별로 직접 바꾼 칸(길게 눌러 끌기): 같은 라운드 안에서 두 사람 칸을 맞바꾼다
   // 업무 중에 바뀐 날: 지난 라운드(at 앞)는 바뀌기 전 표 그대로, 남은 라운드는 그 표에서 고친다.
   // 새로 생긴 빈자리(키퍼 먼저, 그다음 빠진 사람 출근부 순)는 그 라운드 X 중 번호가 작은 사람이 메운다.
+  // 릴리프 인원을 '적용 · N R부터'로 바꾼 날(fresh): 지난 라운드는 그대로, at부터는 새 인원으로 규칙대로 짠 표.
   const dplan = d.plan && typeof d.plan === 'object' && d.plan.cells && typeof d.plan.cells === 'object' ? d.plan : null;
   const planAt = dplan ? Math.max(1, Math.min(5, Number(dplan.at) || 1)) : 0;
   if (dplan) {
@@ -1072,6 +1101,7 @@ function compute(k = ui.date) {
         for (const g of live) g.cells[i] = absent(g.row.id, r) ? { kind: 'absent', note: notes[g.row.id], idx: -1, lock: true } : Object.assign(toCell((dplan.cells[g.row.id] || [])[i]), { lock: true });
         continue;
       }
+      if (dplan.fresh) continue; // 이 라운드부터는 새 인원으로 규칙대로 짠 표 그대로
       const jobs = ['K', ...ring.filter(sl => sl.kind === 'seat' && sl.rounds.includes(r)).map(sl => 's:' + sl.seat.id)];
       const jobSet = new Set(jobs), taken = new Set(), assign = new Map();
       const here = live.filter(g => !absent(g.row.id, r)).map(g => g.row.id);
@@ -1136,7 +1166,7 @@ function compute(k = ui.date) {
   });
   const xCount = new Map(grid.filter(g => g.cells).map(g => [g.row.id, g.cells.filter(c => c.kind === 'side').length]));
   const leave = base.people.filter(p => notes[p.id] && LEAVE_TYPES.includes(notes[p.id].type)).map(p => p.id);
-  return { d, k, notes, rows, group, vac, jobs, ring, kpos, ringSet: !!mring, autoRefs, autoStarts, N, M, L, E, turn, starter, nums, numOf, firstVac, vacRank, starts, manual, grid, gaps, xCount, leave, rating, fills, swapped, planAt };
+  return { d, k, notes, rows, group, vac, jobs, ring, kpos, ringSet: !!mring, autoRefs, autoStarts, N, M, L, E, turn, starter, nums, numOf, firstVac, vacRank, starts, manual, grid, gaps, xCount, leave, rating, fills, swapped, planAt, planFresh: !!(dplan && dplan.fresh) };
 }
 /* ---------- 자리 상태 (그날 기준) ----------
    ok = 주인이 일함 / absent = 주인 특이사항(릴리프가 돌며 메움) / away = 주인이 오늘 릴리프·인턴 기간 밖 /
@@ -1292,12 +1322,21 @@ function renderTable() {
 
   // 인원이 모자랄 때 먼저 넣을 사람
   const backupP = base.backup && P.has(base.backup) ? P.get(base.backup) : null;
-  const listed = reliefIdsFor(c.d);
+  const listed = pendIdsFor(c.d);
   const bNote = backupP ? c.notes[backupP.id] : null;
   const backupBtn = backupP && !listed.includes(backupP.id) && !(bNote && ROUNDS.every(r => bNote.rounds.includes(r)))
     ? `<button class="btn sm ghost" data-act="addbackup">${esc(backupP.name)} 넣기</button>` : '';
   const offRelief = c.rows.filter(r => r.off && r.p.role === '릴리프');
-  const shortInfo = offRelief.length && c.M < reliefOrder().length ? `
+  // 릴리프 인원을 바꿔 두면(적용 전) 적용 버튼이 켜진다
+  const pd = pendDiff(c.d), pending = pd.add.length + pd.del.length > 0, mid = midRound(ui.date);
+  const applyBtns = mid
+    ? `<button class="btn lit" data-act="applyroster" data-v="now">적용 · ${mid}R부터</button><button class="btn ghost" data-act="applyroster" data-v="all">처음부터 적용</button>`
+    : '<button class="btn lit" data-act="applyroster" data-v="all">적용</button>';
+  const pendWhat = [pd.add.length ? `넣음 ${pd.add.map(nameOf).join(', ')}` : '', pd.del.length ? `뺌 ${pd.del.map(nameOf).join(', ')}` : ''].filter(Boolean).join(' · ');
+  const applyBar = pending ? `
+      <div class="applybar" role="status"><p><b>릴리프 인원이 바뀌었어요</b> · ${esc(pendWhat)} (${pd.now.length}명 → ${pd.next.length}명)<br>'적용'을 누르면 업무표·번호·키퍼 순번·원 그림에 모두 들어가요.${mid ? ` 지금 ${mid}R이라 ${mid - 1}R까지는 그대로 두고 ${mid}R부터 새로 짜요. 처음부터 다시 짜려면 '처음부터 적용'.` : ''}</p>
+        <div class="btns">${applyBtns}<button class="btn ghost" data-act="pendcancel">취소</button></div></div>` : '';
+  const shortInfo = !pending && offRelief.length && c.M < reliefOrder().length ? `
       <div class="info"><p><b>${offRelief.map(r => `${esc(r.p.name)} ${esc(r.note.type)}`).join(', ')}</b> · 오늘 도는 사람이 ${c.M}명이에요. 대신 들어갈 사람을 넣어 주세요.</p>
         <div class="btns"><button class="btn sm" data-act="addrelief">+ 대신 넣기</button>${backupBtn}</div></div>` : '';
 
@@ -1310,7 +1349,7 @@ function renderTable() {
 
   const shareLabel = inFrame ? '사진 만들기' : '카톡으로 보내기';
   const lockBar = c.planAt ? `
-      <div class="lockbar"><p><b>업무 중 바뀐 표</b> · ${c.planAt > 4 ? '근무가 끝나서 모든 라운드를 그대로 뒀어요.' : `${c.planAt > 1 ? `${c.planAt - 1}R까지는 그대로, ` : ''}${c.planAt}R부터 다시 짰어요.`} 새 빈자리는 그 라운드 X 중 번호가 작은 사람이 메워요. 안 맞으면 칸을 길게 눌러 옮기세요.</p>
+      <div class="lockbar"><p><b>업무 중 바뀐 표</b> · ${c.planAt > 4 ? '근무가 끝나서 모든 라운드를 그대로 뒀어요.' : `${c.planAt > 1 ? `${c.planAt - 1}R까지는 그대로, ` : ''}${c.planAt}R부터 ${c.planFresh ? '새 인원으로 ' : ''}다시 짰어요.`}${c.planFresh ? '' : ' 새 빈자리는 그 라운드 X 중 번호가 작은 사람이 메워요.'} 안 맞으면 칸을 길게 눌러 옮기세요.</p>
         <div class="btns"><button class="btn sm ghost" data-act="lockat" data-v="-1" ${c.planAt <= 1 ? 'disabled' : ''}>‹ 고정 줄이기</button><button class="btn sm ghost" data-act="lockat" data-v="1" ${c.planAt >= 5 ? 'disabled' : ''}>고정 늘리기 ›</button><button class="btn sm ghost" data-act="replan">처음부터 다시 짜기</button></div></div>` : '';
   const customized = Array.isArray(c.d.reliefs);
   const starterName = c.starter && c.starter.id ? nameOf(c.starter.id) : '';
@@ -1330,6 +1369,7 @@ function renderTable() {
       <div class="card-h"><h2>업무표 <span class="count">${fmtDay(ui.date)}</span></h2></div>
       <div class="need">${starterName ? `<span>키퍼 시작 <b class="kname">${esc(starterName)}</b></span>` : ''}<span>필요 <b>${c.N}</b>명 (키퍼 1 + 공백 ${c.N - 1})</span><span>릴리프 <b>${c.M}</b>명</span>${pill}</div>
       ${noteLine}
+      ${applyBar}
       ${shortInfo}
       ${lockBar}
       ${tableHtml}
@@ -1342,22 +1382,33 @@ function renderTable() {
 
   /* 오늘 릴리프: 번호 순(0번 키퍼가 맨 위). 이름을 길게 눌러 키퍼 줄로 끌면 그 사람이 오늘 키퍼를 시작 */
   const noOf = row => (row.off || !c.numOf.has(row.id) ? 99 : c.numOf.get(row.id));
-  const reliefRows = c.rows.slice().sort((a, b) => (a.off - b.off) || (noOf(a) - noOf(b))).map(row => {
-    const s = SEAT.get(row.id);
-    const subs = [];
-    if (row.p.role !== '릴리프') subs.push(row.p.role);
+  const subsOf = (id, note) => {
+    const p = P.get(id), s = SEAT.get(id), subs = [];
+    if (p.role !== '릴리프') subs.push(p.role);
     if (s) subs.push(`원래 자리 ${s.side} ${s.seat.station}`);
-    if (row.note) subs.push(noteLabel(row.note));
+    if (note) subs.push(noteLabel(note));
+    return subs;
+  };
+  const reliefRows = c.rows.slice().sort((a, b) => (a.off - b.off) || (noOf(a) - noOf(b))).map(row => {
+    const subs = subsOf(row.id, row.note);
+    if (pd.del.includes(row.id)) {
+      // 뺄 사람(적용 전): 줄 긋고 다시 넣기 버튼
+      return `<li class="rrow gone"><span class="rnum">뺌<small>적용 전</small></span><button class="rname" data-act="relief" data-v="${row.id}"><b>${esc(row.p.name)}</b>${subs.length ? `<small>${esc(subs.join(' · '))}</small>` : ''}</button><button class="rx" data-act="rerelief" data-v="${row.id}" aria-label="${esc(row.p.name)} 다시 넣기">↺</button></li>`;
+    }
     const n = noOf(row), zero = n === 0;
     const dnd = n === 99 ? '' : ` data-drag="rk" data-drop="rk" data-pid="${row.id}"${zero ? ' data-zero="1"' : ''} data-label="${esc(row.p.name)}"`;
     return `<li class="rrow${zero ? ' zero' : ''}${row.off ? ' off' : ''}"${dnd}><span class="rnum">${row.off ? '빠짐' : `${n}번${zero ? '<small>키퍼</small>' : ''}`}</span><button class="rname" data-act="relief" data-v="${row.id}"><b>${esc(row.p.name)}</b>${subs.length ? `<small>${esc(subs.join(' · '))}</small>` : ''}</button><button class="rx" data-act="unrelief" data-v="${row.id}" aria-label="${esc(row.p.name)} 오늘 릴리프에서 빼기">✕</button></li>`;
+  }).join('') + base.people.filter(p => pd.add.includes(p.id)).map(p => {
+    // 넣을 사람(적용 전)
+    const subs = subsOf(p.id, c.notes[p.id]);
+    return `<li class="rrow new"><span class="rnum">새로<small>적용 전</small></span><button class="rname" data-act="relief" data-v="${p.id}"><b>${esc(p.name)}</b>${subs.length ? `<small>${esc(subs.join(' · '))}</small>` : ''}</button><button class="rx" data-act="unrelief" data-v="${p.id}" aria-label="${esc(p.name)} 넣기 취소">✕</button></li>`;
   }).join('');
   const reliefCard = `
     <div class="card">
-      <div class="card-h"><h2>오늘 릴리프 <span class="count">${c.rows.length}명</span></h2></div>
-      ${c.rows.length ? `<ul class="rlist">${reliefRows}</ul>` : ''}
-      <p class="hint">이름을 길게 눌러 맨 위 <b>키퍼</b> 줄로 끌면 그 사람이 오늘 키퍼를 시작하고, 번호는 출근부 순서대로 다시 붙어요. 다음 근무일부터는 그 사람 다음 차례로 이어져요. 이름을 누르면 다른 사람으로 바꿔요. 공백이 많으면 파트장·그룹장·작업자를 더 넣을 수 있어요.${backupP ? ` 인원이 모자라면 ${esc(eul(backupP.name))} 먼저 넣어요.` : ''} 작업자를 넣으면 그 사람 자리는 오늘 공석(!)이 되고, 빼면 제자리로 돌아가요.</p>
-      <div class="btns"><button class="btn" data-act="addrelief">+ 릴리프 추가</button>${backupBtn}${c.turn && c.turn.set ? '<button class="btn ghost" data-act="turnauto">키퍼 순번대로</button>' : ''}${customized ? '<button class="btn ghost" data-act="defrelief">기본 릴리프로</button>' : ''}</div>
+      <div class="card-h"><h2>오늘 릴리프 <span class="count">${pending ? `${pd.now.length}명 → ${pd.next.length}명` : `${c.rows.length}명`}</span></h2></div>
+      ${reliefRows ? `<ul class="rlist">${reliefRows}</ul>` : ''}
+      <p class="hint">이름을 길게 눌러 맨 위 <b>키퍼</b> 줄로 끌면 그 사람이 오늘 키퍼를 시작하고, 번호는 출근부 순서대로 다시 붙어요. 다음 근무일부터는 그 사람 다음 차례로 이어져요. 이름을 누르면 다른 사람으로 바꿔요. 넣거나 빼면 '적용 전'으로 모아 두고, 켜진 <b>적용</b>을 누르면 업무표·번호·키퍼 순번에 모두 들어가요. 공백이 많으면 파트장·그룹장·작업자를 더 넣을 수 있어요.${backupP ? ` 인원이 모자라면 ${esc(eul(backupP.name))} 먼저 넣어요.` : ''} 작업자를 넣으면 그 사람 자리는 오늘 공석(!)이 되고, 빼면 제자리로 돌아가요.</p>
+      <div class="btns"><button class="btn" data-act="addrelief">+ 릴리프 추가</button>${backupBtn}${pending ? `${applyBtns}<button class="btn ghost" data-act="pendcancel">취소</button>` : '<button class="btn" data-act="applyroster" data-v="all" disabled title="바뀐 인원이 없어요">적용</button>'}${c.turn && c.turn.set ? '<button class="btn ghost" data-act="turnauto">키퍼 순번대로</button>' : ''}${customized ? '<button class="btn ghost" data-act="defrelief">기본 릴리프로</button>' : ''}</div>
     </div>`;
 
   el.innerHTML = dateBar + notesCard + dutyCard + reliefCard + whyCard(c);
@@ -1633,14 +1684,43 @@ function setWork(v) {
 function addBackup() {
   if (!base.backup || !P.has(base.backup)) return;
   const id = base.backup;
-  const o0 = turnFor(ui.date);
-  editCond(d => {
-    const arr = reliefIdsFor(d).slice();
-    if (!arr.includes(id)) arr.push(id);
-    d.reliefs = arr;
+  stageRoster(arr => { if (!arr.includes(id)) arr.push(id); return arr; }, `${nameOf(id)} 넣음`);
+}
+// 오늘 릴리프 넣기·빼기·바꾸기는 '적용 전'(days[날짜].pend)으로 모은다. 적용을 눌러야 표에 들어간다
+function stageRoster(fn, msg) {
+  const before = snapDay();
+  editDay(d => { const arr = pendIdsFor(d).slice(); d.pend = fn(arr) || arr; });
+  render();
+  const d = days[ui.date];
+  toast(`${msg}${d && Array.isArray(d.pend) ? " · '적용'을 누르면 표에 들어가요" : ' · 바꾼 게 없어졌어요'}`, () => restoreDay(before));
+}
+// 바꿔 둔 명단 적용: 업무표·번호·키퍼 순번·원 그림을 새 인원으로 다시 짠다.
+// fromNow = 업무 중이면 지난 라운드는 그대로 두고 지금 라운드부터 새로(plan.fresh)
+function applyRoster(fromNow) {
+  const k = ui.date, d0 = days[k];
+  if (!d0 || !Array.isArray(d0.pend)) return;
+  const before = snapDay(), o0 = turnFor(k);
+  const { del, next } = pendDiff(d0);
+  const r0 = fromNow ? midRound(k) : 0;
+  let cells = null;
+  if (r0) {
+    const c0 = compute(k);
+    cells = {};
+    for (const g of c0.grid) if (g.cells) cells[g.row.id] = g.cells.map(cellRef);
+  }
+  editDay(d => {
+    d.reliefs = next.slice();
+    delete d.pend;
+    for (const id of del) {
+      const p = P.get(id), st = SEAT.get(id);
+      if (d.turn === id && p && p.role !== '릴리프') delete d.turn;
+      if (st && d.fills && d.fills[st.seat.id]) delete d.fills[st.seat.id]; // 제자리로 돌아오면 대신 서던 사람은 빠진다
+    }
+    delete d.starts; delete d.swaps;
+    if (r0) d.plan = { at: r0, cells, fresh: true }; else delete d.plan;
   });
   render();
-  toast(`${nameOf(id)} 릴리프로 넣었어요${keeperNews(o0)}`);
+  toast(`릴리프 ${next.length}명으로 적용했어요${r0 ? ` · ${r0}R부터 새로` : ''}${keeperNews(o0)}`, () => restoreDay(before));
 }
 
 const fmtShort = k => { const d = parseKey(k); return `${d.getMonth() + 1}.${d.getDate()}`; };
@@ -1950,7 +2030,7 @@ function openStartSheet(pid) {
 
 function openReliefSheet(pid) {
   const c = compute();
-  const list = reliefIdsFor(c.d);
+  const list = pendIdsFor(c.d);
   const fillBy = new Map(Object.entries(c.fills).map(([sid, id]) => [id, findSeatById(sid)]));
   const groups = [
     ['릴리프', p => p.role === '릴리프'],
@@ -1967,14 +2047,14 @@ function openReliefSheet(pid) {
       const off = n && ROUNDS.every(r => n.rounds.includes(r));
       const s = SEAT.get(p.id);
       const fs = fillBy.get(p.id);
-      const sub = p.id === pid ? '지금 이 사람' : inList ? '오늘 릴리프' : fs ? `오늘 대신 ${fs.seat.station}` : n ? noteLabel(n) : !internActive(p, c.k) ? '기간 아님' : s ? `${s.side} ${s.seat.station}` : p.role;
+      const sub = p.id === pid ? '지금 이 사람' : inList ? (reliefIdsFor(c.d).includes(p.id) ? '오늘 릴리프' : '넣음 · 적용 전') : fs ? `오늘 대신 ${fs.seat.station}` : n ? noteLabel(n) : !internActive(p, c.k) ? '기간 아님' : s ? `${s.side} ${s.seat.station}` : p.role;
       const dis = inList || off || !!fs;
       return `<button class="pchip r-${RC[p.role]}${n ? ' has' : ''}${p.id === pid ? ' cur' : ''}" data-s="pick" data-v="${p.id}" ${dis ? 'disabled' : ''}><span class="n">${esc(p.name)}</span><span class="m">${esc(sub)}</span></button>`;
     }).join('')}</div>`;
   }).join('');
   const who = pid ? P.get(pid) : null;
   openSheet(who ? `${who.name} 바꾸기` : '릴리프 추가',
-    `<p class="hint">${who ? '대신 넣을 사람을 고르세요. 번호는 출근부 자리대로 다시 매겨요.' : '더 넣을 사람을 고르세요. 그룹장·파트장·작업자·인턴도 넣을 수 있어요. 번호는 출근부 자리대로 매겨요.'} 작업자를 넣으면 그 사람 자리는 오늘 공석(!)이 되고, 빼면 제자리로 돌아가요.</p>${sec}
+    `<p class="hint">${who ? '대신 넣을 사람을 고르세요. 번호는 출근부 자리대로 다시 매겨요.' : '더 넣을 사람을 고르세요. 그룹장·파트장·작업자·인턴도 넣을 수 있어요. 번호는 출근부 자리대로 매겨요.'} 고른 사람은 '적용 전'으로 모아 두고, 오늘 릴리프의 <b>적용</b>을 누르면 표에 들어가요. 작업자를 넣으면 그 사람 자리는 오늘 공석(!)이 되고, 빼면 제자리로 돌아가요.</p>${sec}
      ${who ? '<div class="btns"><button class="btn danger" data-s="remove">오늘 릴리프에서 빼기</button></div>' : ''}`, b => {
     b.onclick = e => {
       const t = e.target.closest('[data-s]');
@@ -1982,35 +2062,19 @@ function openReliefSheet(pid) {
       if (t.dataset.s === 'remove') { closeSheet(); removeRelief(pid); return; }
       if (t.dataset.s !== 'pick') return;
       const id = t.dataset.v;
-      const o0 = turnFor(ui.date);
-      editCond(d => {
-        const arr = reliefIdsFor(d).slice();
-        if (pid) {
-          const i = arr.indexOf(pid);
-          if (i >= 0) arr[i] = id; else arr.push(id);
-          if (d.starts && d.starts[pid] !== undefined) { d.starts[id] = d.starts[pid]; delete d.starts[pid]; }
-          if (d.turn === pid && P.get(pid).role !== '릴리프') delete d.turn;
-        } else arr.push(id);
-        d.reliefs = arr;
-      });
+      onSheetClose = null;
       closeSheet();
-      const st = SEAT.get(id);
-      toast(`${pid ? `${P.get(pid).name} → ${P.get(id).name}` : `${P.get(id).name} 릴리프로 넣었어요`}${st ? ` · ${st.side} ${st.seat.station} 오늘 공석(!)` : ''}${keeperNews(o0)}`);
+      stageRoster(arr => {
+        if (pid) { const i = arr.indexOf(pid); if (i >= 0) arr[i] = id; else arr.push(id); } else arr.push(id);
+        return arr;
+      }, pid ? `${P.get(pid).name} → ${P.get(id).name}` : `${P.get(id).name} 넣음`);
     };
   }, () => render());
 }
 function removeRelief(pid) {
   const p = P.get(pid);
-  const st = SEAT.get(pid);
-  const o0 = turnFor(ui.date);
-  editCond(d => {
-    d.reliefs = reliefIdsFor(d).filter(x => x !== pid);
-    if (d.starts) delete d.starts[pid];
-    if (d.turn === pid && p && p.role !== '릴리프') delete d.turn;
-    if (st && d.fills && d.fills[st.seat.id]) delete d.fills[st.seat.id]; // 제자리로 돌아오면 대신 서던 사람은 빠진다
-  });
-  render();
-  if (p) toast(`${p.name} 오늘 릴리프에서 뺐어요${st && p.role !== '릴리프' ? ` · ${st.side} ${st.seat.station} 제자리로` : ''}${keeperNews(o0)}`);
+  if (!p) return;
+  stageRoster(arr => arr.filter(x => x !== pid), `${p.name} 뺌`);
 }
 // 사람을 넣고 빼서 오늘 키퍼 차례가 바뀌었으면 한마디
 function keeperNews(o0) {
@@ -2907,7 +2971,10 @@ document.addEventListener('click', e => {
     case 'relief': openReliefSheet(v); break;
     case 'unrelief': removeRelief(v); break;
     case 'addrelief': openReliefSheet(null); break;
-    case 'defrelief': editCond(d => { delete d.reliefs; delete d.starts; }); render(); toast('기본 릴리프로 되돌렸어요'); break;
+    case 'defrelief': stageRoster(() => defaultReliefIds(), '기본 릴리프로'); break;
+    case 'rerelief': stageRoster(arr => { if (!arr.includes(v)) arr.push(v); return arr; }, `${nameOf(v)} 다시 넣음`); break;
+    case 'pendcancel': { const before = snapDay(); editDay(d => { delete d.pend; }); render(); toast('바꾼 인원을 취소했어요', () => restoreDay(before)); break; }
+    case 'applyroster': applyRoster(v === 'now'); break;
     case 'autostart': editDay(d => { delete d.starts; }); render(); toast('규칙대로 되돌렸어요'); break;
     case 'seat': openSeatSheet(b.dataset.side, v); break;
     case 'addseat': addSeat(v); break;
