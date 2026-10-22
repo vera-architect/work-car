@@ -16,6 +16,17 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // 릴리프 업무표(relief/)는 새 판이 바로 보이게: 인터넷이 되면 새로 받고(저장본도 새로), 안 되면 저장본
+  if (url.pathname.indexOf('/relief/') !== -1) {
+    var fresh = !/version\.json$/.test(url.pathname);
+    e.respondWith(fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(function (res) {
+      if (fresh && res && res.ok) { var copy = res.clone(); caches.open(CACHE).then(function (c) { return c.put(url.origin + url.pathname, copy); }); }
+      return res;
+    }).catch(function () {
+      return caches.match(url.origin + url.pathname).then(function (hit) { return hit || Response.error(); });
+    }));
+    return;
+  }
   var net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(function (res) {
     if (!res || !res.ok) return res;
     var copy = res.clone();

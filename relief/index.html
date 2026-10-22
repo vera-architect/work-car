@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
 <style>
-/* 레이아웃: 폰 한 손 조작. 위에 제목·탭 고정, 아래로 카드(날짜 → 특이사항 → 업무표 → 돌아가는 근거 → 오늘 릴리프).
+/* 레이아웃: 폰 한 손 조작. 위에 제목·탭 고정, 아래로 카드(날짜 → 특이사항 → 오늘 릴리프 → 업무표 → 라운드마다 한 칸씩 → 돌아가는 근거).
    업무표와 자리표는 종이 로테이션표처럼 굵은 테두리 격자, 고른 것은 안전 노랑으로 표시.
    돌아가는 근거의 원 그림은 손으로 그리는 원(키퍼 아래, 화살표 방향으로 한 칸씩)을 그대로 옮긴 것.
    v3: 탭 4개(업무표·자리표·명단·달력). 칸은 길게 눌러 끌어 옮기고, 채워야 할 자리는 빨간 느낌표(!) */
@@ -504,6 +504,18 @@ html.locked .applyfloat{display:none}
 .ring .dragging{opacity:.35}
 .ring .drop-over rect{stroke:var(--accent);stroke-width:3}
 .ring .rs.drop-over rect{fill:var(--accent-bg)}
+/* v7: 라운드 카드 · 단톡방 링크 · 기록 내보내기 · 새 판 알림 */
+.card-h .hsub{font-size:12.5px;color:var(--muted);font-weight:500}
+.syncline{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:13px;color:var(--muted);line-height:1.5;padding:0 4px;margin:0}
+.syncline b{color:var(--ink);font-weight:600}
+.syncline.stale{display:grid;gap:8px;border:1px solid var(--absent);background:var(--absent-bg);color:var(--ink);border-radius:6px;padding:10px 12px}
+.syncline.stale strong{color:var(--absent)}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;font-size:14px}
+.kv>span{font-size:13px;font-weight:700;color:var(--muted)}
+.kv b{min-width:0;overflow-wrap:anywhere}
+.linkbox{font-family:var(--font-num);font-size:12px;line-height:1.4;word-break:break-all}
+.updbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:0 0 8px;padding:8px 12px;border:1.5px solid var(--accent-line);background:var(--accent-bg);border-radius:6px;font-size:14px}
+.updbar .btn{min-height:38px}
 </style>
 </head>
 <body>
@@ -519,6 +531,7 @@ html.locked .applyfloat{display:none}
       <button role="tab" id="tab-roster" aria-controls="view-roster" data-act="tab" data-v="roster">명단</button>
       <button role="tab" id="tab-cal" aria-controls="view-cal" data-act="tab" data-v="cal">달력</button>
     </nav>
+    <div class="updbar" id="updBar" role="status" hidden><span>새 판(<b id="updVer"></b>)이 나왔어요. 새로고침하면 바로 바뀌어요.</span><button class="btn sm primary" data-act="reload">새로고침</button></div>
   </div>
 </header>
 
@@ -555,7 +568,11 @@ const LEAVE_MAX = 5; // 연·월차는 하루 최대 5명 (릴리프 연·월차
 const TYPE_DEF = Object.fromEntries([...TYPES, ['조퇴', [3, 4]]]); // 예전 기록의 '조퇴'도 읽는다
 const ROUNDS = [1, 2, 3, 4];
 const KEEP_DAYS = 40;
-const KEY = { base: 'relief.base.v1', days: 'relief.days.v1', ui: 'relief.ui.v1' };
+const KEY = { base: 'relief.base.v1', days: 'relief.days.v1', ui: 'relief.ui.v1', sync: 'relief.sync.v1', gone: 'relief.gone.v1' };
+const APP_VER = '7.0';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
+const ALGO_VER = '6.2';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
+// 단톡방 링크는 늘 공개 주소로 만든다(본인용 화면에서 보내도 동료는 브라우저로 바로 연다)
+const PUBLIC_URL = 'https://vera-architect.github.io/work-car/relief/';
 
 // 기본 명단: 출근부 순서. 공개 주소에 올릴 때는 DEFAULTS = null 로 바꾸고 명단은 코드로 나눈다.
 // turn = 키퍼 순번 기준(그날 순번 주인), backup = 인원이 모자랄 때 먼저 넣을 사람
@@ -601,7 +618,7 @@ const store = (() => {
 })();
 
 function defaultBase() {
-  if (!DEFAULTS) return { v: 3, rotation: '', people: [], seats: { RH: [], LH: [] }, turn: null, backup: null };
+  if (!DEFAULTS) return { v: 3, rotation: '', people: [], seats: { RH: [], LH: [] }, turn: null, backup: null, t: 0 };
   const people = DEFAULTS.people.map(([name, role], i) => ({ id: 'p' + (i + 1), name, role }));
   const idOf = new Map(people.map(p => [p.name, p.id]));
   const seats = {};
@@ -611,15 +628,17 @@ function defaultBase() {
   const turn = DEFAULTS.turn && idOf.get(DEFAULTS.turn[1]) ? { date: DEFAULTS.turn[0], pid: idOf.get(DEFAULTS.turn[1]) } : null;
   const backup = DEFAULTS.backup ? idOf.get(DEFAULTS.backup) || null : null;
   const shift = DEFAULTS.shift ? { week: DEFAULTS.shift[0], kind: DEFAULTS.shift[1] } : null;
-  return { v: 3, rotation: DEFAULTS.rotation, people, seats, turn, backup, shift };
+  return { v: 3, rotation: DEFAULTS.rotation, people, seats, turn, backup, shift, t: 0 };
 }
 // v1(조장)·v2도 받아서 v3로 옮긴다. v3: 인턴 기간(from·to), 비워 둔 원래 자리(home)
 function cleanBase(b) {
   if (!b || ![1, 2, 3].includes(b.v) || !Array.isArray(b.people) || !b.seats || !Array.isArray(b.seats.RH) || !Array.isArray(b.seats.LH)) return null;
   const old = b.v === 1;
   const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  // (v7) id는 영문·숫자·-·_ 만(링크로 받은 명단도 거른다)
+  const idOk = v => typeof v === 'string' && /^[A-Za-z0-9_-]{1,60}$/.test(v) && !['__proto__', 'constructor', 'prototype'].includes(v);
   const seen = new Set();
-  let people = b.people.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string' && (ROLES.includes(p.role) || p.role === '조장') && !seen.has(p.id) && seen.add(p.id))
+  let people = b.people.filter(p => p && idOk(p.id) && typeof p.name === 'string' && p.name.trim() && (ROLES.includes(p.role) || p.role === '조장') && !seen.has(p.id) && seen.add(p.id))
     .map(p => {
       const o = { id: p.id, name: p.name.slice(0, 20), role: p.role === '조장' ? '파트장' : p.role };
       if (o.role === '인턴') { if (isDate(p.from)) o.from = p.from; if (isDate(p.to)) o.to = p.to; }
@@ -628,7 +647,7 @@ function cleanBase(b) {
     });
   const seats = {};
   for (const side of ['RH', 'LH']) {
-    seats[side] = b.seats[side].filter(s => s && typeof s.id === 'string')
+    seats[side] = b.seats[side].filter(s => s && idOk(s.id))
       .map(s => ({ id: s.id, station: String(s.station || '').slice(0, 20), tag: String(s.tag || '').slice(0, 12), hold: !!s.hold, pid: typeof s.pid === 'string' ? s.pid : null }));
   }
   const allSeats = [...seats.RH, ...seats.LH];
@@ -642,7 +661,9 @@ function cleanBase(b) {
   if (old && !backup && DEFAULTS && DEFAULTS.backup) backup = byName(DEFAULTS.backup);
   let shift = b.shift && isDate(b.shift.week) && (b.shift.kind === '주간' || b.shift.kind === '야간') ? { week: b.shift.week, kind: b.shift.kind } : null;
   if (!shift && b.v !== 3 && DEFAULTS && DEFAULTS.shift) shift = { week: DEFAULTS.shift[0], kind: DEFAULTS.shift[1] };
-  return { v: 3, rotation: String(b.rotation || '').slice(0, 20), people, seats, turn, backup, shift };
+  // (v7) t = 명단·자리표를 마지막으로 고친 시각. 단톡방 링크를 받을 때 어느 쪽이 새 것인지 가린다
+  const t = Number(b.t) > 0 ? Number(b.t) : 0;
+  return { v: 3, rotation: String(b.rotation || '').slice(0, 20), people, seats, turn, backup, shift, t };
 }
 
 const storedBase = store.get(KEY.base);
@@ -679,8 +700,17 @@ let warnedFull = false;
 function persist(k, v) {
   if (!store.set(k, v) && store.ok && !warnedFull) { warnedFull = true; toast('저장 공간이 부족해서 저장하지 못했어요'); }
 }
-function saveBase() { persist(KEY.base, base); reindex(); DATA_VER++; }
+// auto = 사람이 고친 게 아니라 앱이 스스로 옮긴 것(40일 지우기·링크 받기) → 고친 시각(t)은 그대로
+function saveBase(auto) { if (!auto) base.t = Date.now(); persist(KEY.base, base); reindex(); DATA_VER++; }
 function saveDays() { persist(KEY.days, days); DATA_VER++; }
+// (v7) 단톡방 링크: me = 내 이름, in = 마지막으로 받은 링크 {by, at, k}, out = 마지막으로 보낸 링크 {at, k}
+let sync = store.get(KEY.sync);
+if (!sync || typeof sync !== 'object' || Array.isArray(sync)) sync = {};
+function saveSync() { persist(KEY.sync, sync); }
+// (v7) 지운 날: 날짜 → 지운 시각. 링크에 같이 실어서 다른 폰에서도 지워지게 한다
+let goneMap = store.get(KEY.gone);
+if (!goneMap || typeof goneMap !== 'object' || Array.isArray(goneMap)) goneMap = {};
+function saveGone() { persist(KEY.gone, goneMap); }
 
 // 40일 지난 기록은 지운다. 지워지는 날(직접 맞춘 순번·특근·휴무·주말 기록) 때문에 순번 셈이 달라지지 않게
 // 남는 첫날 기준으로 순번을 먼저 옮겨 둔다. (순번 계산을 쓰므로 맨 아래 render 앞에서 부른다)
@@ -688,13 +718,15 @@ function purge() {
   const cutoff = addDays(workDayKey(), -KEEP_DAYS);
   const ok = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && !!days[k] && typeof days[k] === 'object';
   const bad = Object.keys(days).filter(k => !ok(k)), old = Object.keys(days).filter(k => ok(k) && k < cutoff);
+  const goneOld = Object.keys(goneMap).filter(k => !/^\d{4}-\d{2}-\d{2}$/.test(k) || k < cutoff);
+  if (goneOld.length) { goneOld.forEach(k => { delete goneMap[k]; }); saveGone(); }
   if (!bad.length && !old.length) return;
   bad.forEach(k => { delete days[k]; });
   if (old.length) {
     const T = turnCache();
     if (T.first && T.first < cutoff && (!base.turn || base.turn.date < cutoff)) {
       const o = ownerAt(cutoff);
-      if (o && o.owner) { base.turn = { date: cutoff, pid: o.owner, exact: true }; saveBase(); } // 다 센 값이라 그날 그대로(exact)
+      if (o && o.owner) { base.turn = { date: cutoff, pid: o.owner, exact: true }; saveBase(true); } // 다 센 값이라 그날 그대로(exact)
     }
     old.forEach(k => { delete days[k]; });
   }
@@ -722,6 +754,7 @@ function pendDiff(d) {
 const midRound = k => { if (k !== workDayKey()) return 0; const r = curRound(k); return r >= 2 && r <= 4 ? r : 0; };
 function editDay(fn, opts) {
   const k = ui.date;
+  const had = !!days[k];
   const d = days[k] || { notes: {} };
   if (!d.notes || typeof d.notes !== 'object') d.notes = {};
   if (opts && opts.cond) snapPlan(k, d);
@@ -737,7 +770,16 @@ function editDay(fn, opts) {
   if (!d.turn) delete d.turn;
   if (d.opt !== undefined && !['two', 'side', 'side2', 'old'].includes(d.opt)) delete d.opt;
   const empty = !d.opt && !Object.keys(d.notes).length && !Array.isArray(d.reliefs) && !Array.isArray(d.pend) && !d.starts && !d.turn && !d.fills && !d.swaps && !d.plan && !d.sent && !d.work && !d.ring;
-  if (empty) delete days[k]; else { d.t = Date.now(); days[k] = d; }
+  if (empty) {
+    delete days[k];
+    if (had) { goneMap[k] = Date.now(); saveGone(); } // 지운 날도 링크로 다른 폰에 알린다
+  } else {
+    d.t = Date.now(); days[k] = d;
+    if (goneMap[k]) { delete goneMap[k]; saveGone(); }
+    // (v7) 이 날 앱이 규칙대로 짠 표와 실제로 쓰는 표를 남긴다(기록 내보내기 · 알고리즘 고칠 때 비교용)
+    DATA_VER++;
+    try { d.snap = takeSnap(k); } catch (e) { delete d.snap; }
+  }
   saveDays();
 }
 
@@ -965,10 +1007,12 @@ const SIDE = { kind: 'side' };
 const slotOn = (sl, r) => sl.kind !== 'side' && sl.rounds.includes(r);
 
 // opts.opt = 미리보기할 배치 안(그날 직접 바꾼 원·사람 자리·칸·업무 중 고정은 빼고 그 안 그대로)
+// opts.auto = (v7) 앱이 규칙대로 짠 표: 그날 조건(특이사항·릴리프 인원·대신 서기)만 쓰고, 직접 정한 키퍼 차례·배치 안·원·사람 자리·칸·업무 중 고정은 뺀다
 function compute(k = ui.date, opts) {
   const dRaw = days[k] || { notes: {} };
-  const preview = !!(opts && opts.opt);
-  const d = preview ? Object.assign({}, dRaw, { ring: undefined, starts: undefined, swaps: undefined, plan: undefined }) : dRaw;
+  const auto = !!(opts && opts.auto);
+  const preview = !!(opts && opts.opt) || auto;
+  const d = preview ? Object.assign({}, dRaw, { ring: undefined, starts: undefined, swaps: undefined, plan: undefined }, auto ? { opt: undefined } : {}) : dRaw;
   const notes = {};
   for (const [pid, n] of Object.entries(d.notes || {})) {
     if (!P.has(pid) || !n || !TYPE_DEF[n.type] || !Array.isArray(n.rounds)) continue;
@@ -995,7 +1039,8 @@ function compute(k = ui.date, opts) {
   const N = jobs.length, M = group.length, L = Math.max(N, M), E = L - N;
 
   // ① 키퍼 순번(그날 차례, 1R에 없으면 앞 사람이 대신) ② 번호: 키퍼 시작 0번, 출근부에서 위로
-  const turn = turnFor(k);
+  let turn = turnFor(k);
+  if (auto && turn && turn.set && turn.auto && turn.order.includes(turn.auto)) turn = Object.assign({}, turn, { owner: turn.auto, idx: turn.order.indexOf(turn.auto), set: false });
   const starter = M ? starterFor(turn, group, absent) : { id: null, sub: false };
   const k0 = Math.max(0, group.indexOf(starter.id));
   const nums = group.map((_, i) => group[(((k0 - i) % M) + M) % M]);
@@ -1335,15 +1380,16 @@ function renderTable() {
       </label>
       <button class="dn" data-act="day" data-v="1" aria-label="다음날">›</button>
     </div>
-    ${ui.date !== today ? `<div class="notday"><span>${ui.date < today ? '지난 날을 보고 있어요' : '다음 날을 보고 있어요'}</span><button class="btn sm ghost" data-act="today">오늘로</button></div>` : ''}`;
+    ${ui.date !== today ? `<div class="notday"><span>${ui.date < today ? '지난 날을 보고 있어요' : '다음 날을 보고 있어요'}</span><button class="btn sm ghost" data-act="today">오늘로</button></div>` : ''}
+    ${syncLineHtml()}`;
 
   if (!base.people.length) {
     lastC = null;
     el.innerHTML = dateBar + `
       <div class="card">
         <h2>명단이 아직 없어요</h2>
-        <p class="hint">받은 명단 코드를 붙여 넣으면 명단과 자리표가 한 번에 들어와요. 직접 넣으려면 명단 탭에서 사람을 추가하세요.</p>
-        <div class="btns"><button class="btn primary" data-act="import">코드 불러오기</button><button class="btn ghost" data-act="tab" data-v="roster">직접 넣기</button></div>
+        <p class="hint">단톡방에 올라온 <b>업무표 링크</b>를 누르면 명단·자리표·키퍼 순번·기록이 한 번에 들어와요. 받은 링크나 명단 코드를 아래에 붙여 넣어도 돼요. 직접 넣으려면 명단 탭에서 사람을 추가하세요.</p>
+        <div class="btns"><button class="btn primary" data-act="import">링크·코드 붙여넣기</button><button class="btn ghost" data-act="tab" data-v="roster">직접 넣기</button></div>
       </div>`;
     return;
   }
@@ -1437,7 +1483,8 @@ function renderTable() {
       <span class="hint">사람을 더 넣어 주세요.${backupP ? ` 인원이 모자라면 ${esc(eul(backupP.name))} 넣어요.` : ''}</span>
       <div class="btns">${backupBtn}<button class="btn sm ghost" data-act="addrelief">+ 릴리프 추가</button></div></div>` : '';
 
-  const shareLabel = inFrame ? '사진 만들기' : '카톡으로 보내기';
+  const shareLabel = inFrame ? '사진 만들기' : '사진으로 보내기';
+  const sendLabel = ui.date === today ? '오늘 표 보내기' : `${fmtShort(ui.date)} 표 보내기`;
   const lockBar = c.planAt ? `
       <div class="lockbar"><p><b>업무 중 바뀐 표</b> · ${c.planAt > 4 ? '근무가 끝나서 모든 라운드를 그대로 뒀어요.' : `${c.planAt > 1 ? `${c.planAt - 1}R까지는 그대로, ` : ''}${c.planAt}R부터 ${c.planFresh ? '바꾼 대로 ' : ''}다시 짰어요.`}${c.planFresh ? '' : ' 새 빈자리는 그 라운드 X 중 번호가 작은 사람이 메워요.'} 안 맞으면 칸을 길게 눌러 옮기세요.</p>
         <div class="btns"><button class="btn sm ghost" data-act="lockat" data-v="-1" ${c.planAt <= 1 ? 'disabled' : ''}>‹ 고정 줄이기</button><button class="btn sm ghost" data-act="lockat" data-v="1" ${c.planAt >= 5 ? 'disabled' : ''}>고정 늘리기 ›</button><button class="btn sm ghost" data-act="replan">처음부터 다시 짜기</button></div></div>` : '';
@@ -1466,7 +1513,8 @@ function renderTable() {
       ${seatAlert}
       <div class="legend"><span><i class="sw k"></i>키퍼</span><span><i class="sw c"></i>이름 = 그 사람 자리를 메움</span><span><i class="sw x"></i>X = 사이드(대기)</span><span><i class="sw a"></i>특이사항</span>${c.swapped ? '<span><i class="sw m"></i>직접 옮긴 칸</span>' : ''}${c.planAt ? '<span><i class="sw l"></i>지난 라운드(그대로)</span><span><i class="sw f"></i>업무 중 바뀐 칸</span>' : ''}</div>
       <p class="hint">칸을 길게 누르면 같은 라운드 안에서 다른 사람 칸과 맞바꿀 수 있어요. ${startNote}</p>
-      <div class="btns">${c.swapped ? '<button class="btn ghost" data-act="swapreset">옮긴 칸 되돌리기</button>' : ''}${c.manual ? '<button class="btn ghost" data-act="autostart">규칙대로 되돌리기</button>' : ''}${c.ringSet ? '<button class="btn ghost" data-act="ringauto">원 순서 되돌리기</button>' : ''}<button class="btn primary" data-act="share" ${c.rows.length ? '' : 'disabled'}>${shareLabel}</button><button class="btn ghost" data-act="sharetext" ${c.rows.length ? '' : 'disabled'}>글로 복사</button></div>
+      <div class="btns">${c.swapped ? '<button class="btn ghost" data-act="swapreset">옮긴 칸 되돌리기</button>' : ''}${c.manual ? '<button class="btn ghost" data-act="autostart">규칙대로 되돌리기</button>' : ''}${c.ringSet ? '<button class="btn ghost" data-act="ringauto">원 순서 되돌리기</button>' : ''}<button class="btn primary" data-act="sendlink" ${c.rows.length ? '' : 'disabled'}>${sendLabel}</button><button class="btn ghost" data-act="share" ${c.rows.length ? '' : 'disabled'}>${shareLabel}</button><button class="btn ghost" data-act="sharetext" ${c.rows.length ? '' : 'disabled'}>글로 복사</button></div>
+      <p class="hint"><b>${esc(sendLabel)}</b> = 단톡방에 올릴 링크를 만들어요. 링크를 누른 폰은 이 표와 명단·키퍼 순번·기록이 그대로 맞춰져요.</p>
     </div>`;
 
   /* 오늘 릴리프: 번호 순(0번 키퍼가 맨 위). 이름을 길게 눌러 키퍼 줄로 끌면 그 사람이 오늘 키퍼를 시작 */
@@ -1500,7 +1548,8 @@ function renderTable() {
       <div class="btns"><button class="btn" data-act="addrelief">+ 릴리프 추가</button>${backupBtn}${c.turn && c.turn.set ? '<button class="btn ghost" data-act="turnauto">키퍼 순번대로</button>' : ''}${customized ? '<button class="btn ghost" data-act="defrelief">기본 릴리프로</button>' : ''}</div>
     </div>`;
 
-  el.innerHTML = dateBar + notesCard + dutyCard + reliefCard + whyCard(c, prev);
+  // (v7) 순서: 특이사항 → 오늘 릴리프 → 업무표 → 라운드마다 한 칸씩(배치 안 + 원 그림) → 돌아가는 근거(①②③)
+  el.innerHTML = dateBar + notesCard + reliefCard + dutyCard + ringCard(c, prev) + whyCard(c);
   mountRing(lastC); // 미리보기 중이면 그 안으로 이름표를 놓는다
 }
 
@@ -1517,7 +1566,7 @@ function reasonOf(c, g) {
   return i === 0 ? `${what}부터` : `${i}R 쉬고 ${i + 1}R ${what}`;
 }
 
-function whyCard(c, prev) {
+function whyCard(c) {
   if (!c.rows.length) return '';
   const t = c.turn;
   let s1;
@@ -1584,6 +1633,21 @@ function whyCard(c, prev) {
           ${c.planAt ? '<p class="hint bad">업무 중에 바뀐 날이에요. 번호와 원 그림은 규칙 기준이고, 표는 바뀐 대로예요.</p>' : ''}
           ${c.manual || c.swapped ? '<p class="hint bad">직접 바꾼 칸이 있어서 이 규칙과 다른 곳이 있어요. 원 그림은 실제 표대로 보여 줘요.</p>' : c.ringSet ? '<p class="hint">원 그림에서 칸 순서를 직접 바꿨어요. 1R 자리는 이 규칙 그대로고, 2R부터 바꾼 순서대로 돌아요.</p>' : c.rating && c.rating.inv ? '<p class="hint">이 날은 빈자리가 비는 시간 때문에 X가 번호 순서대로 다 나뉘지는 않았어요.</p>' : ''}`;
 
+  return `
+    <div class="card" id="whyCard">
+      <div class="card-h"><h2>돌아가는 근거</h2></div>
+      <ol class="steps">
+        <li class="step"><div class="sh"><span class="sn">1</span><b>키퍼 순번</b><small>근무일마다 한 칸씩 아래로</small></div>${s1}</li>
+        <li class="step"><div class="sh"><span class="sn">2</span><b>오늘 번호</b><small>키퍼 시작 0번, 출근부에서 위로</small></div>${s2}</li>
+        <li class="step"><div class="sh"><span class="sn">3</span><b>1R 자리</b><small>0번 키퍼, 1번부터 빈자리</small></div>${s3}</li>
+      </ol>
+      <p class="hint">④ 라운드마다 한 칸씩(배치 안·원 그림)은 업무표 바로 아래에 있어요.</p>
+    </div>`;
+}
+
+/* ---------- (v7) 라운드마다 한 칸씩: 배치 안 + 원 그림 (업무표 바로 아래) ---------- */
+function ringCard(c, prev) {
+  if (!c.rows.length || !c.group.length) return '';
   // 배치 안: 누르면 아래 원에 미리 보이고, 화면 아래 '적용'을 누르면 업무표에 들어간다
   const pk = pickFor(c.k), shown = pk ? pk.opt : c.optCur;
   const optCards = c.opts.map((o, i) => {
@@ -1607,14 +1671,9 @@ function whyCard(c, prev) {
           ${c.ringSet || c.manual ? `<div class="btns">${c.ringSet ? '<button class="btn sm ghost" data-act="ringauto">원 순서 되돌리기</button>' : ''}${c.manual ? '<button class="btn sm ghost" data-act="autostart">사람 자리 규칙대로</button>' : ''}</div>` : ''}`;
 
   return `
-    <div class="card" id="whyCard">
-      <div class="card-h"><h2>돌아가는 근거</h2></div>
-      <ol class="steps">
-        <li class="step"><div class="sh"><span class="sn">1</span><b>키퍼 순번</b><small>근무일마다 한 칸씩 아래로</small></div>${s1}</li>
-        <li class="step"><div class="sh"><span class="sn">2</span><b>오늘 번호</b><small>키퍼 시작 0번, 출근부에서 위로</small></div>${s2}</li>
-        <li class="step"><div class="sh"><span class="sn">3</span><b>1R 자리</b><small>0번 키퍼, 1번부터 빈자리</small></div>${s3}</li>
-        <li class="step"><div class="sh"><span class="sn">4</span><b>라운드마다 한 칸씩</b><small>${c.ringSet ? '직접 바꾼 칸 순서' : '배치 안 고르기 · 키퍼 앞뒤 X, 1번 맞은편'}</small></div>${s4}</li>
-      </ol>
+    <div class="card" id="ringCard">
+      <div class="card-h"><h2>라운드마다 한 칸씩</h2><small class="hsub">${c.ringSet ? '직접 바꾼 칸 순서' : '배치 안 고르기 · 키퍼 앞뒤 X, 1번 맞은편'}</small></div>
+      ${s4}
     </div>`;
 }
 
@@ -1959,10 +2018,22 @@ function renderRoster() {
       <p class="hint">출근부 순서예요. 키퍼 순번·번호·빈자리 순서가 모두 이 순서를 따라요. <b>이름을 길게 눌러 끌면 순서가 바뀌고</b> 모든 화면에 바로 반영돼요. 누르면 이름·역할·자리·인턴 기간을 바꿀 수 있어요. 오늘 상태는 ${fmtDay(ui.date)} 기준이에요.</p>
       ${base.people.length ? `<ol class="roster">${items}</ol>` : '<p class="noempty">아직 아무도 없어요.</p>'}
     </div>
+    <div class="card" id="syncCard">
+      <h3>단톡방 링크로 맞추기</h3>
+      <p class="hint">업무표의 <b>오늘 표 보내기</b>로 만든 링크를 단톡방에 올리면, 링크를 누른 폰은 명단·자리표·키퍼 순번·특근·휴무·${KEEP_DAYS}일 기록이 모두 이대로 맞춰져요. 내 폰에 있는 것보다 새 것만 덮어써요. 담당이 바뀌면 새 담당은 단톡방의 최신 링크를 한 번 누르고 이어서 쓰면 돼요.</p>
+      <div class="kv"><span>내 이름</span><b>${sync.me ? esc(sync.me) : '아직 안 정함'}</b><button class="btn sm ghost" data-act="setme" ${base.people.length ? '' : 'disabled'}>${sync.me ? '바꾸기' : '정하기'}</button></div>
+      <p class="hint">${syncInfoText()}</p>
+      <div class="btns"><button class="btn ghost" data-act="pastelink">받은 링크 붙여넣기</button></div>
+    </div>
+    <div class="card" id="logCard">
+      <h3>기록 내보내기</h3>
+      <p class="hint">${KEEP_DAYS}일 기록을 파일 하나(.json)로 받아요. 날마다 <b>앱이 규칙대로 짠 표</b>와 <b>실제로 쓴 표</b>, 손으로 바꾼 것과 둘의 차이가 들어 있어서, AI에게 주면 규칙(알고리즘)을 고칠 때 쓸 수 있어요. 동료 이름이 들어 있으니 나에게만 보내 주세요.</p>
+      <div class="btns"><button class="btn" data-act="exportlog" ${nDays ? '' : 'disabled'}>기록 파일 받기</button></div>
+    </div>
     <div class="card">
-      <h3>다른 폰과 명단 맞추기</h3>
-      <p class="hint">명단·자리표·키퍼 순번을 글 코드로 만들어 카톡으로 보내요. 받은 사람은 '코드 불러오기'에 붙여 넣으면 똑같이 맞춰져요. 특이사항 기록은 들어가지 않아요.</p>
-      <div class="btns"><button class="btn" data-act="export" ${base.people.length ? '' : 'disabled'}>코드 만들기</button><button class="btn ghost" data-act="import">코드 불러오기</button></div>
+      <h3>명단 코드로 맞추기</h3>
+      <p class="hint">명단·자리표·키퍼 순번만 글 코드로 주고받는 예전 방식이에요. 특이사항 기록은 들어가지 않아요. 보통은 위 단톡방 링크를 쓰면 돼요.</p>
+      <div class="btns"><button class="btn ghost" data-act="export" ${base.people.length ? '' : 'disabled'}>코드 만들기</button><button class="btn ghost" data-act="import">코드·링크 불러오기</button></div>
     </div>
     <div class="card">
       <h3>근무조</h3>
@@ -1975,6 +2046,7 @@ function renderRoster() {
         ? `이 폰에만 저장돼요. 특이사항과 업무표는 ${KEEP_DAYS}일이 지나면 저절로 지워져요. 지금 남아 있는 기록: <b>${nDays}일</b>`
         : '이 화면에서는 저장이 안 돼요. 창을 닫으면 넣은 내용이 사라져요.'}</p>
       <div class="btns"><button class="btn ghost" data-act="history" ${nDays ? '' : 'disabled'}>지난 기록 보기</button></div>
+      <p class="hint">앱 판 <b>v${APP_VER}</b> · 표 짜는 규칙 v${ALGO_VER}</p>
     </div>`;
 }
 
@@ -2253,7 +2325,12 @@ function internName() {
 }
 /* ---------- 되돌리기 ---------- */
 function snapDay(k = ui.date) { return { k, d: days[k] ? JSON.parse(JSON.stringify(days[k])) : null }; }
-function restoreDay(s) { if (s.d) days[s.k] = s.d; else delete days[s.k]; saveDays(); render(); toast('되돌렸어요'); }
+// 되돌리기도 새로 고친 것으로 친다(t 갱신) — 그래야 링크로 다른 폰에도 되돌린 대로 넘어간다
+function restoreDay(s) {
+  if (s.d) { s.d.t = Date.now(); days[s.k] = s.d; if (goneMap[s.k]) { delete goneMap[s.k]; saveGone(); } }
+  else { if (days[s.k]) { goneMap[s.k] = Date.now(); saveGone(); } delete days[s.k]; }
+  saveDays(); render(); toast('되돌렸어요');
+}
 function undoBase(before) { const b = cleanBase(JSON.parse(before)); if (b) { base = b; saveBase(); render(); toast('되돌렸어요'); } }
 
 /* ---------- 오늘만 대신 서기 ---------- */
@@ -2645,16 +2722,29 @@ function openExport() {
   });
 }
 function openImport(prefill) {
-  let parsed = null, body;
+  let parsed = null, link = null, body;
   const draw = msg => {
     const v = body.querySelector('#codeIn') ? body.querySelector('#codeIn').value : (prefill || '');
     body.innerHTML = `
-      <p class="hint">받은 코드를 아래 칸에 붙여 넣고 확인을 누르세요.</p>
-      <textarea id="codeIn" rows="5" placeholder="RLF1.로 시작하는 코드" ${prefill ? '' : 'data-autofocus'}>${esc(v)}</textarea>
+      <p class="hint">단톡방에서 받은 <b>업무표 링크</b>나 <b>명단 코드</b>(RLF1.)를 아래 칸에 붙여 넣고 확인을 누르세요.</p>
+      <textarea id="codeIn" rows="5" placeholder="…#S1.… 링크 또는 RLF1.로 시작하는 코드" ${prefill ? '' : 'data-autofocus'}>${esc(v)}</textarea>
       ${msg || ''}
-      <div class="btns"><button class="btn${parsed ? ' ghost' : ' primary'}" data-s="check">확인</button>${parsed ? '<button class="btn primary" data-s="apply">이 명단으로 바꾸기</button>' : ''}</div>`;
+      <div class="btns"><button class="btn${parsed || link ? ' ghost' : ' primary'}" data-s="check">확인</button>${parsed ? '<button class="btn primary" data-s="apply">이 명단으로 바꾸기</button>' : ''}${link ? '<button class="btn primary" data-s="sync">이 표로 맞추기</button>' : ''}</div>`;
   };
-  const check = () => {
+  const check = async () => {
+    const text = body.querySelector('#codeIn').value;
+    parsed = null; link = null;
+    if (/\bS1\.[jz]/.test(text)) {
+      // (v7) 단톡방 링크: 미리 보여 주고 '이 표로 맞추기'
+      try {
+        const pkt = await unpackLink(text);
+        link = text;
+        draw(`<div class="preview"><b>${esc(ga(String(pkt.by || '').trim() || '누군가'))}</b> ${esc(fmtWhen(pkt.at))}에 보낸 표${isDayKey(pkt.k) ? ` · ${fmtDay(pkt.k)}` : ''}<br>명단 ${(pkt.base.people || []).length}명 · 기록 ${Object.keys(pkt.days || {}).length}일<br>내 폰에 있는 것보다 새 것만 덮어써요.</div>`);
+      } catch (err) {
+        draw(`<div class="warn"><strong>${esc(err.message)}</strong></div>`);
+      }
+      return;
+    }
     try {
       parsed = decodeCode(body.querySelector('#codeIn').value);
       const seated = parsed.seats.RH.concat(parsed.seats.LH).filter(s => s.pid).length;
@@ -2665,13 +2755,14 @@ function openImport(prefill) {
       draw(`<div class="warn"><strong>${esc(err.message)}</strong></div>`);
     }
   };
-  openSheet('명단 코드 불러오기', '', b => {
+  openSheet('링크·코드 불러오기', '', b => {
     body = b; draw();
     if (prefill) check();
     b.onclick = e => {
       const t = e.target.closest('[data-s]');
       if (!t) return;
       if (t.dataset.s === 'check') check();
+      else if (t.dataset.s === 'sync' && link) receiveLink(link);
       else if (t.dataset.s === 'apply' && parsed) {
         base = parsed; saveBase(); closeSheet();
         toast(`명단 ${base.people.length}명을 불러왔어요`);
@@ -2716,11 +2807,12 @@ function openReset() {
       const t = e.target.closest('[data-s]');
       if (!t) return;
       if (t.dataset.s === 'day') {
+        if (days[ui.date]) { goneMap[ui.date] = Date.now(); saveGone(); }
         delete days[ui.date]; saveDays(); closeSheet(); render();
         toast(`${fmtDay(ui.date)} 표를 지웠어요`);
       } else if (t.dataset.s === 'all') {
         if (!armed) { armed = true; draw(); return; }
-        base = defaultBase(); days = {}; saveBase(); saveDays();
+        base = defaultBase(); days = {}; goneMap = {}; delete sync.in; delete sync.out; saveBase(true); saveDays(); saveGone(); saveSync();
         ui.date = workDayKey(); closeSheet(); render();
         toast('처음 상태로 되돌렸어요');
       }
@@ -2762,6 +2854,508 @@ async function copyTableText() {
 }
 // 표를 보낸 뒤에 조건이 바뀌면 지난 라운드를 그대로 두도록 '보냄' 표시
 function markSent() { if (ui.date === workDayKey() && !(days[ui.date] && days[ui.date].sent)) editDay(d => { d.sent = true; }); }
+
+/* ================= (v7) 앱이 짠 표 남기기 =================
+   날짜 기록(days[날짜])을 고칠 때마다 snap에 두 가지를 남긴다.
+   auto = 그날 조건(특이사항·릴리프 인원·대신 서기)만으로 앱이 규칙대로 짠 표
+   used = 직접 정한 키퍼 차례·배치 안·원·사람 자리·칸 맞바꾸기·업무 중 고정까지 들어간, 실제로 쓰는 표
+   칸 이름: 키퍼 'K', 사이드 'X', 빈자리 's:자리id', 그 라운드에 빠짐 '-' */
+const snapRef = cell => (cell.kind === 'absent' ? '-' : cellRef(cell));
+function snapPart(c) {
+  const cells = {};
+  for (const g of c.grid) if (g.cells) cells[g.row.id] = g.cells.map(snapRef);
+  const ring = c.L ? c.ring.map((_, j) => ringRef(c.ring[(c.kpos + j) % c.L])) : [];
+  return { start: c.starter && c.starter.id ? c.starter.id : null, nums: c.nums.slice(), cells, ring };
+}
+function takeSnap(k) {
+  const c = compute(k), a = compute(k, { auto: true });
+  const t = c.turn;
+  return { v: ALGO_VER, at: Date.now(), owner: t ? t.owner : null,
+    auto: Object.assign(snapPart(a), { owner: t ? t.auto : null }),
+    used: Object.assign(snapPart(c), { opt: c.d.opt || 'rule' }) };
+}
+// 보낼 때는 그날 표를 다시 남긴다(명단을 고친 뒤에 보내도 그날 쓴 표가 맞게)
+function resnap(k) { const d = days[k]; if (!d) return; DATA_VER++; try { d.snap = takeSnap(k); saveDays(); } catch (e) {} }
+
+/* ================= (v7) 단톡방 링크 =================
+   담당이 '오늘 표 보내기'로 링크를 만들어 단톡방에 올린다. 링크(공개 주소#S1.…)에는 명단·자리표·키퍼 순번 기준·근무조와
+   40일 기록(특이사항·특근·휴무·직접 바꾼 것·앱이 짠 표)·지운 날이 다 들어 있다(압축). 누르면 그 폰이 이대로 맞춰진다.
+   맞추는 규칙: 날짜 기록은 날짜마다 고친 시각(t)이 더 새 쪽을 쓴다(지운 날도 지운 시각으로 견줌).
+   명단·자리표는 내 폰에서 링크를 보낸 시각 뒤에 고친 게 아니면 받은 것으로 바꾼다. 폰마다 사람 id가 달라도 이름으로 맞춘다. */
+const isDayKey = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+const dayOfTime = ts => { const d = new Date(ts); if (d.getHours() < 3) d.setDate(d.getDate() - 1); return keyOf(d); };
+const fmtTime = ts => { const d = new Date(ts); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtWhen = ts => `${fmtDay(keyOf(new Date(ts)))} ${fmtTime(ts)}`;
+const isoLocal = ts => { const d = new Date(ts); return `${keyOf(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+function lastSync() {
+  const a = sync.in && sync.in.at ? { at: sync.in.at, who: sync.in.by || '누군가', mine: false } : null;
+  const b = sync.out && sync.out.at ? { at: sync.out.at, who: sync.me || '나', mine: true } : null;
+  return a && b ? (a.at >= b.at ? a : b) : a || b;
+}
+// 오래된 표 경고: 마지막 링크 뒤로 근무일을 하루 넘게 건너뛰었거나, 오늘 근무 중인데 오늘 링크가 없으면
+function syncState() {
+  const last = lastSync();
+  if (!last) return null;
+  const today = workDayKey(), sd = dayOfTime(last.at);
+  let missed = false;
+  for (let j = addDays(sd, 1), g = 0; j < today && g < 60; j = addDays(j, 1), g++) if (isWorkDay(j)) { missed = true; break; }
+  const r = curRound(today);
+  const noToday = !missed && sd < today && isWorkDay(today) && r >= 1 && r <= 4;
+  return Object.assign({ missed, noToday }, last);
+}
+function syncLineHtml() {
+  const s = syncState();
+  if (!s) return '';
+  const who = `<b>${esc(s.who)}</b>${s.mine ? '(나)' : ''} · ${esc(fmtWhen(s.at))}`;
+  if (s.missed || s.noToday) {
+    return `<div class="syncline stale" role="status"><span><strong>${s.missed ? '최근 표를 못 받았을 수 있어요' : '오늘 보낸 표가 아직 없어요'}</strong> · 마지막 표 ${who}</span><span class="hint">담당이면 표를 확정하고 '오늘 표 보내기'를, 아니면 단톡방의 최신 링크를 눌러 주세요.</span></div>`;
+  }
+  return `<p class="syncline">마지막 표 ${who}</p>`;
+}
+function syncInfoText() {
+  const parts = [];
+  if (sync.in && sync.in.at) parts.push(`마지막으로 받은 표: <b>${esc(sync.in.by || '누군가')}</b> · ${esc(fmtWhen(sync.in.at))}`);
+  if (sync.out && sync.out.at) parts.push(`마지막으로 보낸 표: ${esc(fmtWhen(sync.out.at))}`);
+  return parts.length ? parts.join('<br>') : '아직 주고받은 링크가 없어요.';
+}
+
+const B64 = {
+  enc: bytes => { let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); },
+  dec: s => { let b = s.replace(/-/g, '+').replace(/_/g, '/'); while (b.length % 4) b += '='; return Uint8Array.from(atob(b), ch => ch.charCodeAt(0)); },
+};
+async function zipBytes(bytes, how) { const s = new Blob([bytes]).stream().pipeThrough(how); return new Uint8Array(await new Response(s).arrayBuffer()); }
+function buildPacket() {
+  const from = addDays(workDayKey(), -KEEP_DAYS);
+  const ds = {};
+  for (const [k, d] of Object.entries(days)) {
+    if (!isDayKey(k) || k < from || !d || typeof d !== 'object') continue;
+    const o = Object.assign({}, d);
+    delete o.pend; // 적용 전인 것은 보내지 않는다
+    ds[k] = o;
+  }
+  const gone = {};
+  for (const [k, t] of Object.entries(goneMap)) if (isDayKey(k) && k >= from) gone[k] = t;
+  return { v: 1, app: APP_VER, by: sync.me || '', at: Date.now(), k: ui.date, base, days: ds, gone };
+}
+async function packLink(pkt) {
+  const raw = new TextEncoder().encode(JSON.stringify(pkt));
+  let code = 'j' + B64.enc(raw);
+  try {
+    if (typeof CompressionStream === 'function') {
+      const z = 'z' + B64.enc(await zipBytes(raw, new CompressionStream('deflate-raw')));
+      if (z.length < code.length) code = z;
+    }
+  } catch (e) {}
+  return 'S1.' + code;
+}
+async function unpackLink(text) {
+  const m = String(text || '').match(/\bS1\.([jz])([A-Za-z0-9_-]{8,})/);
+  if (!m) throw new Error('업무표 링크를 찾지 못했어요. 링크를 처음부터 끝까지 다시 복사해 주세요');
+  let pkt;
+  try {
+    let bytes = B64.dec(m[2]);
+    if (m[1] === 'z') {
+      if (typeof DecompressionStream !== 'function') throw new Error('old');
+      bytes = await zipBytes(bytes, new DecompressionStream('deflate-raw'));
+    }
+    pkt = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (e) {
+    throw new Error(e && e.message === 'old' ? '이 브라우저로는 링크를 못 열어요. 크롬이나 삼성 인터넷으로 열어 주세요' : '링크가 잘렸거나 바뀌었어요. 단톡방에서 링크를 다시 눌러 주세요');
+  }
+  if (!pkt || pkt.v !== 1 || !Number.isFinite(pkt.at) || !pkt.base || !pkt.days || typeof pkt.days !== 'object') throw new Error('업무표 링크 형식이 아니에요');
+  return pkt;
+}
+
+// 두 명단 사이 id 짝(이름으로 사람, 줄·자리 이름·몇 번째로 자리). 같으면 null
+function idMaps(from, to) {
+  const byName = new Map(to.people.map(p => [p.name, p.id]));
+  const p = new Map(from.people.map(x => [x.id, byName.get(x.name) || null]));
+  const keys = b => {
+    const m = new Map();
+    for (const side of ['RH', 'LH']) {
+      const cnt = {};
+      for (const s of b.seats[side]) { cnt[s.station] = (cnt[s.station] || 0) + 1; m.set(`${side}|${s.station}|${cnt[s.station]}`, s.id); }
+    }
+    return m;
+  };
+  const tk = keys(to), s = new Map();
+  for (const [key, id] of keys(from)) s.set(id, tk.get(key) || null);
+  const same = [...p].every(([a, b]) => a === b) && [...s].every(([a, b]) => a === b);
+  return same ? null : { p, s };
+}
+// 날짜 기록 안의 사람·자리 id를 다른 명단 기준으로 바꾼다(없는 사람은 뺀다)
+function remapDay(d, m) {
+  if (!m || !d || typeof d !== 'object') return d;
+  const pm = id => (m.p.has(id) ? m.p.get(id) : id);
+  const sm = id => (m.s.has(id) ? m.s.get(id) : id);
+  const rm = r => (typeof r === 'string' && r.startsWith('s:') ? (sm(r.slice(2)) ? 's:' + sm(r.slice(2)) : 'X') : r);
+  const byKey = (o, f) => { const out = {}; for (const [k, v] of Object.entries(o || {})) { const nk = f(k); if (nk) out[nk] = v; } return out; };
+  const arr = a => (Array.isArray(a) ? a.map(pm).filter(Boolean) : a);
+  const cellsOf = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [pm(k), Array.isArray(v) ? v.map(rm) : v]).filter(([k]) => k));
+  const part = x => (x && typeof x === 'object' ? Object.assign({}, x, { start: x.start ? pm(x.start) : null, owner: x.owner ? pm(x.owner) : null, nums: arr(x.nums), ring: Array.isArray(x.ring) ? x.ring.map(rm) : x.ring, cells: cellsOf(x.cells) }) : x);
+  const o = Object.assign({}, d);
+  if (d.notes && typeof d.notes === 'object') o.notes = byKey(d.notes, pm);
+  if (Array.isArray(d.reliefs)) o.reliefs = arr(d.reliefs);
+  if (Array.isArray(d.pend)) o.pend = arr(d.pend);
+  if (d.starts && typeof d.starts === 'object') o.starts = byKey(d.starts, pm);
+  if (d.turn) { const t = pm(d.turn); if (t) o.turn = t; else delete o.turn; }
+  if (d.swaps && typeof d.swaps === 'object') {
+    o.swaps = {};
+    for (const [r, prs] of Object.entries(d.swaps)) o.swaps[r] = (Array.isArray(prs) ? prs : []).map(x => (Array.isArray(x) ? [pm(x[0]), pm(x[1])] : null)).filter(x => x && x[0] && x[1]);
+  }
+  if (d.fills && typeof d.fills === 'object') { o.fills = {}; for (const [sid, pid] of Object.entries(d.fills)) { const a = sm(sid), b = pm(pid); if (a && b) o.fills[a] = b; } }
+  if (d.plan && typeof d.plan === 'object') o.plan = Object.assign({}, d.plan, { cells: cellsOf(d.plan.cells) });
+  if (Array.isArray(d.ring)) o.ring = d.ring.map(rm);
+  if (d.snap && typeof d.snap === 'object') o.snap = Object.assign({}, d.snap, { owner: d.snap.owner ? pm(d.snap.owner) : null, auto: part(d.snap.auto), used: part(d.snap.used) });
+  return o;
+}
+// 받은 기록은 믿지 않고 한 번 거른다: 명단에 있는 사람·자리만, 알려진 값만 남긴다(망가진 링크로 화면이 깨지지 않게)
+const ownKey = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+function cleanSnap(s, pidOk, refOk) {
+  const part = x => {
+    if (!x || typeof x !== 'object') return null;
+    const cells = {};
+    if (x.cells && typeof x.cells === 'object') for (const [pid, v] of Object.entries(x.cells)) if (pidOk(pid) && Array.isArray(v)) cells[pid] = v.slice(0, 4).map(r => (refOk(r) ? r : 'X'));
+    const o = { start: pidOk(x.start) ? x.start : null, nums: Array.isArray(x.nums) ? x.nums.filter(pidOk) : [], cells, ring: Array.isArray(x.ring) ? x.ring.filter(refOk).slice(0, 60) : [] };
+    if (x.owner !== undefined) o.owner = pidOk(x.owner) ? x.owner : null;
+    if (typeof x.opt === 'string' && ownKey(OPT_NAME, x.opt)) o.opt = x.opt;
+    return o;
+  };
+  return { v: String(s.v || '').slice(0, 10), at: Number(s.at) || 0, owner: pidOk(s.owner) ? s.owner : null, auto: part(s.auto), used: part(s.used) };
+}
+function cleanDay(d, pids, sids) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  const pidOk = x => typeof x === 'string' && pids.has(x);
+  const refOk = r => r === 'K' || r === 'X' || r === '-' || (typeof r === 'string' && r.startsWith('s:') && sids.has(r.slice(2)));
+  const o = { notes: {} };
+  if (d.notes && typeof d.notes === 'object') for (const [pid, n] of Object.entries(d.notes)) {
+    if (!pidOk(pid) || !n || typeof n !== 'object' || typeof n.type !== 'string' || !ownKey(TYPE_DEF, n.type) || !Array.isArray(n.rounds)) continue;
+    const rs = n.rounds.filter(r => ROUNDS.includes(r));
+    if (rs.length) o.notes[pid] = Object.assign({ type: n.type, rounds: rs }, typeof n.memo === 'string' && n.memo ? { memo: n.memo.slice(0, 20) } : {});
+  }
+  if (Array.isArray(d.reliefs)) o.reliefs = d.reliefs.filter(pidOk);
+  if (Array.isArray(d.pend)) o.pend = d.pend.filter(pidOk);
+  if (d.starts && typeof d.starts === 'object') { const s = {}; for (const [pid, v] of Object.entries(d.starts)) if (pidOk(pid) && Number.isInteger(v) && v >= 0 && v < 100) s[pid] = v; if (Object.keys(s).length) o.starts = s; }
+  if (pidOk(d.turn)) o.turn = d.turn;
+  if (d.swaps && typeof d.swaps === 'object') {
+    const sw = {};
+    for (const r of ROUNDS) { const prs = d.swaps[r]; if (!Array.isArray(prs)) continue; const ok = prs.filter(x => Array.isArray(x) && pidOk(x[0]) && pidOk(x[1])).map(x => [x[0], x[1]]); if (ok.length) sw[r] = ok; }
+    if (Object.keys(sw).length) o.swaps = sw;
+  }
+  if (d.fills && typeof d.fills === 'object') { const f = {}; for (const [sid, pid] of Object.entries(d.fills)) if (sids.has(sid) && pidOk(pid)) f[sid] = pid; if (Object.keys(f).length) o.fills = f; }
+  if (d.plan && typeof d.plan === 'object' && d.plan.cells && typeof d.plan.cells === 'object') {
+    const cells = {};
+    for (const [pid, v] of Object.entries(d.plan.cells)) if (pidOk(pid) && Array.isArray(v)) cells[pid] = v.slice(0, 4).map(r => (refOk(r) && r !== '-' ? r : 'X'));
+    o.plan = Object.assign({ at: Math.max(1, Math.min(5, Number(d.plan.at) || 1)), cells }, d.plan.fresh ? { fresh: true } : {});
+  }
+  if (Array.isArray(d.ring)) o.ring = d.ring.filter(r => refOk(r) && r !== '-').slice(0, 60);
+  if (['two', 'side', 'side2', 'old'].includes(d.opt)) o.opt = d.opt;
+  if (d.work === 'on' || d.work === 'off') o.work = d.work;
+  if (d.sent) o.sent = true;
+  o.t = Number(d.t) > 0 ? Number(d.t) : 0;
+  if (d.snap && typeof d.snap === 'object') o.snap = cleanSnap(d.snap, pidOk, refOk);
+  return o;
+}
+function mergePacket(pkt) {
+  const nb = cleanBase(pkt.base);
+  if (!nb || !nb.people.length) throw new Error('링크에 명단이 없어요');
+  const before = { base: JSON.stringify(base), days: JSON.stringify(days), gone: JSON.stringify(goneMap), sync: JSON.stringify(sync) };
+  const takeBase = !base.people.length || !(Number(base.t) > pkt.at);
+  const plain = b => JSON.stringify(Object.assign({}, b, { t: 0 }));
+  const baseChanged = takeBase && plain(base) !== plain(nb);
+  const mLocal = takeBase ? idMaps(base, nb) : null; // 내 기록 → 받은 명단 기준
+  const mIn = takeBase ? null : idMaps(nb, base);    // 받은 기록 → 내 명단 기준
+  const inDays = pkt.days || {}, inGone = pkt.gone && typeof pkt.gone === 'object' ? pkt.gone : {};
+  const fin = takeBase ? nb : base;
+  const pids = new Set(fin.people.map(p => p.id)), sids = new Set([...fin.seats.RH, ...fin.seats.LH].map(s => s.id));
+  const out = {}, gone = Object.assign({}, goneMap);
+  let took = 0, kept = 0, del = 0;
+  const keys = new Set([...Object.keys(days), ...Object.keys(inDays), ...Object.keys(inGone)]);
+  for (const k of keys) {
+    if (!isDayKey(k)) continue;
+    const L = days[k] && typeof days[k] === 'object' ? days[k] : null;
+    const R = ownKey(inDays, k) && inDays[k] && typeof inDays[k] === 'object' ? inDays[k] : null;
+    const Lt = L ? Number(L.t) || 0 : -1, Rt = R ? Number(R.t) || 0 : -1;
+    const Lg = Number(goneMap[k]) || 0, Rg = ownKey(inGone, k) ? Number(inGone[k]) || 0 : 0;
+    const mine = () => (mLocal ? cleanDay(remapDay(L, mLocal), pids, sids) || L : L);
+    const r = R && Rt > Math.max(Lt, Lg) ? cleanDay(remapDay(R, mIn), pids, sids) : null;
+    if (r) {
+      out[k] = r; delete gone[k];
+      if (!L || JSON.stringify(cleanDay(remapDay(L, mLocal), pids, sids)) !== JSON.stringify(r)) took++;
+    } else if (L && !R && Rg > Lt) {
+      gone[k] = Rg; del++; // 보낸 쪽에서 더 나중에 지운 날
+    } else if (L) {
+      out[k] = mine();
+      if (R && Lt > Rt) kept++;
+    } else if (Rg > Lg) gone[k] = Rg;
+  }
+  if (takeBase) base = nb;
+  days = out; goneMap = gone;
+  saveBase(true); saveDays(); saveGone();
+  if (!sync.in || !(sync.in.at > pkt.at)) sync.in = { by: String(pkt.by || '').slice(0, 20), at: pkt.at, k: isDayKey(pkt.k) ? pkt.k : null };
+  saveSync();
+  purge();
+  return { before, took, kept, del, baseChanged };
+}
+function undoMerge(b) {
+  base = cleanBase(JSON.parse(b.base)) || base; days = JSON.parse(b.days); goneMap = JSON.parse(b.gone); sync = JSON.parse(b.sync);
+  saveBase(true); saveDays(); saveGone(); saveSync(); render(); toast('받기 전으로 되돌렸어요');
+}
+let receiving = false;
+async function receiveLink(text) {
+  if (receiving) return false;
+  receiving = true;
+  try {
+    let pkt, r;
+    try { pkt = await unpackLink(text); r = mergePacket(pkt); } catch (e) { toast(e && e.message ? e.message : '링크를 맞추지 못했어요'); return false; }
+    onSheetClose = null; closeSheet();
+    ui.tab = 'table'; ui.date = isDayKey(pkt.k) ? pkt.k : workDayKey(); ui.ringR = 1; ui.pick = null; persistUi();
+    render(); window.scrollTo(0, 0);
+    const who = String(pkt.by || '').trim().slice(0, 20) || '누군가';
+    const news = r.took || r.del || r.baseChanged ? `${ga(who)} 보낸 ${fmtShort(ui.date)} 표를 받았어요` : `${ga(who)} 보낸 표 · 이미 최신이라 바뀐 게 없어요`;
+    toast(`${news}${r.kept ? ` · 내 폰이 더 새로운 ${r.kept}일은 그대로 뒀어요` : ''}`, () => undoMerge(r.before));
+    return true;
+  } finally { receiving = false; }
+}
+function clearHash() { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} }
+function takeHash() {
+  let h = '';
+  try { h = location.hash || ''; } catch (e) { return; }
+  if (/^#RLF1\./.test(h)) { clearHash(); openImport(h.slice(1)); }
+  else if (/^#S1\./.test(h)) { clearHash(); receiveLink(h.slice(1)); }
+}
+
+/* ---------- 보내기 · 내 이름 ---------- */
+function openMeSheet(next) {
+  openSheet('내 이름 고르기', `
+    <p class="hint">단톡방 링크를 보낼 때 '보낸 사람'으로 들어가요. 한 번만 고르면 돼요(이 폰에만 저장).</p>
+    <div class="pgrid">${base.people.map(p => `<button class="pchip r-${RC[p.role]}${sync.me === p.name ? ' cur' : ''}" data-s="me" data-v="${esc(p.name)}"><span class="n">${esc(p.name)}</span><span class="m">${esc(p.role)}</span></button>`).join('')}</div>`, b => {
+    b.onclick = e => {
+      const t = e.target.closest('[data-s="me"]');
+      if (!t) return;
+      sync.me = t.dataset.v; saveSync();
+      onSheetClose = null; closeSheet();
+      toast(`내 이름: ${sync.me}`);
+      if (next) next(); else render();
+    };
+  }, () => render());
+}
+async function openSendSheet() {
+  if (!base.people.length) return;
+  if (!sync.me || !base.people.some(p => p.name === sync.me)) { openMeSheet(() => openSendSheet()); return; }
+  markSent();
+  resnap(ui.date);
+  const pkt = buildPacket();
+  let code;
+  try { code = await packLink(pkt); } catch (e) { toast('링크를 만들지 못했어요'); return; }
+  const url = PUBLIC_URL + '#' + code;
+  const msg = `${tableText()}\n\n▼ 누르면 내 앱이 이 표대로 맞춰져요 (${pkt.by} · ${fmtTime(pkt.at)})\n${url}`;
+  const nDays = Object.keys(pkt.days).length;
+  const canShare = !inFrame && typeof navigator.share === 'function';
+  const sent = () => { sync.out = { at: pkt.at, k: pkt.k }; saveSync(); };
+  openSheet(`${fmtShort(ui.date)} 표 보내기`, `
+    <div class="kv"><span>보내는 사람</span><b>${esc(sync.me)}</b><button class="btn sm ghost" data-s="me">바꾸기</button></div>
+    <p class="hint">단톡방에 올리세요. 링크에 <b>${fmtDay(ui.date)} 표</b>와 명단·자리표·키퍼 순번·특근·휴무·기록 ${nDays}일(앱이 짠 표·고친 것)이 다 들어 있어요. 링크를 누른 폰은 이대로 맞춰지고, 그 폰에 있는 것보다 새 것만 덮어써요.</p>
+    <div class="btns">${canShare ? '<button class="btn primary" data-s="share">카톡으로 보내기</button>' : ''}<button class="btn${canShare ? ' ghost' : ' primary'}" data-s="copy">글+링크 복사</button><button class="btn ghost" data-s="link">링크만 복사</button></div>
+    <textarea id="sendOut" rows="6" readonly class="linkbox">${esc(msg)}</textarea>
+    <p class="hint">동료 이름이 들어 있어요. 우리 단톡방에만 올려 주세요. (링크 ${url.length.toLocaleString()}자)</p>`, b => {
+    b.onclick = async e => {
+      const t = e.target.closest('[data-s]');
+      if (!t) return;
+      if (t.dataset.s === 'me') { onSheetClose = null; closeSheet(); openMeSheet(() => openSendSheet()); return; }
+      if (t.dataset.s === 'share') {
+        try { await navigator.share({ text: msg }); sent(); onSheetClose = null; closeSheet(); render(); toast('보냈어요 · 단톡방에 올라갔는지 확인하세요'); }
+        catch (err) { if (!err || err.name !== 'AbortError') toast('공유 창을 열지 못했어요. 복사해서 붙여 넣어 주세요'); }
+        return;
+      }
+      const text = t.dataset.s === 'link' ? url : msg;
+      sent();
+      if (await copyText(text, '복사했어요 · 단톡방에 붙여 넣으세요')) { onSheetClose = null; closeSheet(); render(); }
+      else {
+        const ta = b.querySelector('#sendOut'); ta.value = text; ta.focus(); ta.select();
+        toast('글자를 길게 눌러 전부 복사하세요');
+      }
+    };
+  }, () => render());
+}
+
+/* ================= (v7) 기록 내보내기 =================
+   40일 기록을 JSON 파일 하나로. 날마다 그날 조건, 앱이 규칙대로 짠 표(appTable), 실제로 쓴 표(usedTable),
+   손으로 바꾼 것(edits), 둘의 차이(diff), 사람이 읽는 표(text). AI에게 주고 규칙(알고리즘)을 고칠 때 쓴다. */
+const OPT_NAME = { rule: '규칙대로', two: '2번이 2R 키퍼', side: '반대쪽(다른 배치)', side2: '반대쪽 2(다른 배치 2)', old: '예전 방식(X 고르게)' };
+const seatLabel = sid => { const f = findSeatById(sid); return f ? `${f.side} ${f.seat.station}` : '(없는 자리)'; };
+function refWord(ref, pid, d) {
+  if (ref === 'K') return '키퍼';
+  if (ref === 'X') return 'X';
+  if (ref === '-') { const n = d && d.notes && pid ? d.notes[pid] : null; return n && n.type ? n.type : '빠짐'; }
+  if (typeof ref === 'string' && ref.startsWith('s:')) {
+    const f = findSeatById(ref.slice(2));
+    const o = f && f.seat.pid && P.has(f.seat.pid) ? P.get(f.seat.pid).name : '';
+    return o ? `${o} 자리` : f ? `${f.side} ${f.seat.station} 자리` : '(없는 자리)';
+  }
+  return String(ref || '');
+}
+function partView(part, d) {
+  if (!part || !part.cells) return null;
+  const nums = Array.isArray(part.nums) ? part.nums : [];
+  const ids = base.people.map(p => p.id).filter(id => part.cells[id]).concat(Object.keys(part.cells).filter(id => !P.has(id)));
+  return {
+    keeperStart: nameOf(part.start) || null,
+    rows: ids.map(id => ({ name: nameOf(id) || '(명단에 없음)', no: nums.indexOf(id), cells: (part.cells[id] || []).map(r => refWord(r, id, d)) })),
+    circle: (part.ring || []).map(r => refWord(r, null, d)),
+  };
+}
+function partDiff(a, b, d) {
+  const out = [];
+  if (!a || !b) return out;
+  if (a.start !== b.start) out.push(`키퍼 시작: 앱 ${nameOf(a.start) || '-'} → 실제 ${nameOf(b.start) || '-'}`);
+  const ids = base.people.map(p => p.id).filter(id => (a.cells && a.cells[id]) || (b.cells && b.cells[id]));
+  for (const id of ids) {
+    const x = (a.cells || {})[id], y = (b.cells || {})[id];
+    if (!x || !y) { out.push(`${nameOf(id)}: ${x ? '실제 표에 없음' : '앱 표에 없음'}`); continue; }
+    for (let i = 0; i < ROUNDS.length; i++) if (x[i] !== y[i]) out.push(`${i + 1}R ${nameOf(id)}: 앱 ${refWord(x[i], id, d)} → 실제 ${refWord(y[i], id, d)}`);
+  }
+  const ra = (a.ring || []).map(r => refWord(r, null, d)).join(' → '), rb = (b.ring || []).map(r => refWord(r, null, d)).join(' → ');
+  if (ra !== rb) out.push(`원 순서: 앱 ${ra} → 실제 ${rb}`);
+  return out;
+}
+function editsOf(d, c) {
+  const e = [], t = c.turn;
+  if (t && t.set) e.push(`키퍼 차례를 직접 정함: ${nameOf(t.owner)} (순번대로면 ${nameOf(t.auto) || '-'})`);
+  if (d.opt) e.push(`배치 안을 고름: ${OPT_NAME[d.opt] || d.opt}`);
+  if (Array.isArray(d.ring)) e.push(`원 칸 순서를 직접 바꿈: ${d.ring.map(r => refWord(r, null, d)).join(' → ')}`);
+  if (d.starts) e.push('사람 자리(1R 시작·이름표)를 직접 바꿈');
+  if (d.swaps && typeof d.swaps === 'object') for (const [r, prs] of Object.entries(d.swaps)) for (const x of prs || []) if (Array.isArray(x)) e.push(`${r}R ${nameOf(x[0])} ↔ ${nameOf(x[1])} 칸 맞바꿈`);
+  if (d.plan) e.push(Number(d.plan.at) > 4 ? '근무가 끝난 뒤 고침 → 모든 라운드 그대로' : `업무 중 바뀜: ${d.plan.at}R부터 ${d.plan.fresh ? '새 인원으로 ' : ''}다시 짬(앞 라운드는 그대로)`);
+  if (Array.isArray(d.pend)) e.push('적용 안 한 릴리프 변경이 남아 있음(표에는 안 들어감)');
+  return e;
+}
+function dayLog(k) {
+  const d = days[k], c = compute(k), t = c.turn;
+  const saved = !!(d.snap && d.snap.auto && d.snap.used);
+  const snap = saved ? d.snap : { v: ALGO_VER, auto: Object.assign(snapPart(compute(k, { auto: true })), { owner: t ? t.auto : null }), used: Object.assign(snapPart(c), { opt: d.opt || 'rule' }) };
+  const notes = base.people.filter(p => c.notes[p.id]).map(p => {
+    const n = c.notes[p.id], s = SEAT.get(p.id);
+    return Object.assign({ name: p.name, type: n.type, rounds: n.rounds }, n.memo ? { memo: n.memo } : {}, s ? { seat: `${s.side} ${s.seat.station}` } : { role: p.role });
+  });
+  const app = partView(snap.auto, d), used = partView(snap.used, d);
+  const off = c.rows.filter(r => r.off).map(r => `${r.p.name}: ${noteLabel(r.note)} (하루 빠짐)`);
+  const text = [`${fmtDay(k)}${d.work === 'on' ? ' 특근' : ''} · 키퍼 시작 ${(used && used.keeperStart) || '-'}${notes.length ? ` · ${notes.map(n => `${n.name} ${n.type}`).join(', ')}` : ''}`]
+    .concat(used ? used.rows.map(r => `${r.name}(${r.no}): ${r.cells.join(' → ')}`) : [], off);
+  const fills = Object.entries(c.fills).map(([sid, pid]) => `${seatLabel(sid)} ← ${nameOf(pid)}`);
+  return {
+    date: k, day: fmtDay(k), shift: shiftOf(k) || null, workDay: isWorkDay(k), mark: d.work === 'on' ? '특근' : d.work === 'off' ? '휴무' : null,
+    notes,
+    reliefs: c.rows.map(r => r.p.name), reliefsChanged: Array.isArray(d.reliefs),
+    fillIns: fills,
+    keeper: t ? { turn: nameOf(t.owner), byRule: nameOf(t.auto) || null, setByHand: !!t.set, start: c.starter && c.starter.id ? nameOf(c.starter.id) : null, startedInstead: !!(c.starter && c.starter.sub) } : null,
+    vacancies: c.vac.map(v => ({ seat: `${v.side} ${v.seat.station}`, owner: v.p.name, type: v.note.type, rounds: v.rounds })),
+    appTable: Object.assign({ algo: `v${snap.v || ALGO_VER}`, from: saved ? `그날 저장(${isoLocal(d.snap.at || d.t || Date.now())})` : '지금 다시 계산(예전 기록)' }, app),
+    usedTable: Object.assign({ option: OPT_NAME[(snap.used && snap.used.opt) || 'rule'] || '규칙대로' }, used),
+    edits: editsOf(d, c),
+    diff: partDiff(snap.auto, snap.used, d),
+    sent: !!d.sent,
+    text,
+  };
+}
+function buildLog() {
+  const keys = Object.keys(days).filter(k => isDayKey(k) && days[k] && typeof days[k] === 'object').sort();
+  const ls = lastSync();
+  const seatList = side => base.seats[side].map(s => Object.assign({ station: s.station }, s.tag ? { tag: s.tag } : {}, { owner: nameOf(s.pid) || null }));
+  return {
+    title: '릴리프 업무표 기록',
+    readme: [
+      '릴리프 업무표 앱에서 내보낸 기록입니다. days에 날짜마다 그날 조건(notes 특이사항·reliefs 그날 릴리프·vacancies 빈자리), 앱이 규칙대로 짠 표(appTable), 실제로 쓴 표(usedTable), 사람이 손으로 바꾼 것(edits), 둘의 차이(diff), 사람이 읽는 표(text)가 있습니다.',
+      '표 칸: 키퍼 = 라인 맨 뒤 최종 확인, X = 사이드(대기), "○○ 자리" = 그날 빠진 ○○의 자리를 메움, 연차·조퇴 등 = 그 사람이 그 라운드에 빠짐. 라운드는 1R~4R.',
+      '번호(no): 그날 키퍼 시작 = 0번, 오늘 도는 사람을 출근부 순서로 놓고 위로 1·2·3(맨 위 다음은 맨 아래). 1번부터 1R 빈자리에 들어가고, 뒷번호일수록 X를 같거나 더 받습니다.',
+      '키퍼 순번(keeper): 근무일마다 지난 근무일 차례의 출근부 바로 아래 사람. 그날 들어온 사람도 출근부 자리대로 낍니다. 차례인 사람이 1R에 없으면 앞 사람이 대신 시작(startedInstead). setByHand = 그날 차례를 손으로 정함.',
+      '원 배치 규칙(v6.2): 원 = 키퍼 → LH 맨 아래→맨 위 → RH 맨 위→맨 아래, 라운드마다 한 칸씩. 키퍼 앞뒤 X(X 하나면 앞), 1번은 키퍼 맞은편, 2번은 키퍼 바로 앞(2R 키퍼), 말번은 키퍼 바로 뒤, 3번은 1번 다음(키퍼 쪽).',
+      'appTable.from이 "그날 저장"이면 그날 앱이 실제로 내놓은 표, "지금 다시 계산"이면 v7 전에 만든 기록이라 지금 규칙으로 다시 계산한 표입니다. algo는 그 표를 짠 규칙의 판입니다.',
+      '규칙을 고치려면 diff와 edits가 많은 날을 보고, 사람이 왜 앱 표를 바꿨는지(어떤 조건에서 어떤 칸을 옮겼는지) 공통점을 찾으면 됩니다.',
+    ],
+    app: `v${APP_VER}`, algo: `v${ALGO_VER}`,
+    exportedAt: isoLocal(Date.now()),
+    exportedBy: sync.me || null,
+    lastLink: ls ? { by: ls.who, at: isoLocal(ls.at) } : null,
+    range: keys.length ? { from: keys[0], to: keys[keys.length - 1], days: keys.length } : null,
+    rotation: base.rotation || null,
+    shift: base.shift ? { week: base.shift.week, kind: base.shift.kind } : null,
+    keeperBase: base.turn ? { date: base.turn.date, name: nameOf(base.turn.pid) } : null,
+    backup: nameOf(base.backup) || null,
+    roster: base.people.map((p, i) => { const s = SEAT.get(p.id); return Object.assign({ order: i + 1, name: p.name, role: p.role }, s ? { seat: `${s.side} ${s.seat.station}` } : {}, p.from ? { from: p.from } : {}, p.to ? { to: p.to } : {}); }),
+    seats: { RH: seatList('RH'), LH: seatList('LH') },
+    days: keys.map(dayLog),
+  };
+}
+// 본인용 화면(Claude 앱 안)에서는 파일 저장 기능을 빌려 쓰고, 공개 주소(브라우저)에서는 바로 내려받는다
+let dlCap;
+function downloadsCap() {
+  if (dlCap === undefined) {
+    dlCap = null;
+    try { if (inFrame && window.claude && typeof window.claude.use === 'function') dlCap = window.claude.use('downloads').catch(() => null); } catch (e) { dlCap = null; }
+  }
+  return Promise.resolve(dlCap);
+}
+async function saveFile(name, text, type) {
+  const cap = await downloadsCap();
+  if (cap) {
+    try { await cap.save({ filename: name, data: text }); return 'saved'; }
+    catch (e) { return e && e.code === 'declined' ? 'declined' : 'fail'; }
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return inFrame ? 'maybe' : 'saved';
+  } catch (e) { return 'fail'; }
+}
+function openLogSheet() {
+  let log, json;
+  try { log = buildLog(); json = JSON.stringify(log, null, 1); } catch (e) { toast('기록을 모으지 못했어요'); return; }
+  const name = `relief-log_${workDayKey()}.json`; // 영문 이름: 폰·브라우저마다 한글 파일 이름이 'download'로 바뀌는 일이 있어서
+  let canShareFile = false;
+  try { canShareFile = !inFrame && !!navigator.canShare && navigator.canShare({ files: [new File(['{}'], 'a.json', { type: 'application/json' })] }); } catch (e) { canShareFile = false; }
+  const kb = Math.max(1, Math.ceil(new Blob([json]).size / 1024));
+  openSheet('기록 내보내기', `
+    <p class="hint"><b>${log.days.length}일</b> 기록${log.range ? `(${fmtShort(log.range.from)}~${fmtShort(log.range.to)})` : ''}을 파일 하나로 받아요. 날마다 그날 조건, <b>앱이 규칙대로 짠 표</b>, <b>실제로 쓴 표</b>, 손으로 바꾼 것, 둘의 차이가 들어 있어요. 이 파일을 Claude에게 주고 "기록을 보고 규칙을 고쳐 줘"라고 하면 돼요.</p>
+    <div class="btns"><button class="btn primary" data-s="dl">파일로 받기</button>${canShareFile ? '<button class="btn ghost" data-s="share">공유하기</button>' : ''}<button class="btn ghost" data-s="copy">글로 복사</button></div>
+    <p class="hint">${esc(name)} · ${kb}KB · 동료 이름이 들어 있어요.</p>`, b => {
+    b.onclick = async e => {
+      const t = e.target.closest('[data-s]');
+      if (!t) return;
+      if (t.dataset.s === 'dl') {
+        const r = await saveFile(name, json, 'application/json');
+        toast(r === 'saved' ? '파일을 받았어요 · 다운로드(내 파일) 폴더를 보세요' : r === 'declined' ? '저장을 취소했어요' : r === 'maybe' ? '파일이 안 받아지면 공개 주소에서 받거나 글로 복사하세요' : '이 화면에서는 파일을 못 받아요. 공개 주소에서 받거나 글로 복사하세요');
+      } else if (t.dataset.s === 'share') {
+        try { await navigator.share({ files: [new File([json], name, { type: 'application/json' })], title: name }); }
+        catch (err) { if (!err || err.name !== 'AbortError') toast('공유하지 못했어요. 파일로 받아 주세요'); }
+      } else if (t.dataset.s === 'copy') {
+        if (!(await copyText(json, '기록을 글로 복사했어요'))) {
+          onSheetClose = null; closeSheet();
+          openSheet('기록 (글)', `<p class="hint">글자를 길게 눌러 전부 선택한 뒤 복사하세요.</p><textarea rows="12" readonly id="logOut" class="linkbox">${esc(json)}</textarea>`, bb => { const ta = bb.querySelector('#logOut'); ta.focus(); ta.select(); });
+        }
+      }
+    };
+  });
+}
+
+/* ================= (v7) 새 판 알림 (공개 주소) =================
+   공개 주소의 version.json이 이 판보다 새것이면 위에 '새로고침' 알림을 띄운다. 열 때와 다시 볼 때(10분에 한 번) 확인 */
+const verNums = v => String(v || '').split('.').map(n => parseInt(n, 10) || 0);
+function newerVer(a, b) { const x = verNums(a), y = verNums(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; }
+let updAt = 0;
+function checkUpdate() {
+  if (inFrame || !/\.github\.io$/.test(location.hostname) || typeof fetch !== 'function' || Date.now() - updAt < 600000) return;
+  updAt = Date.now();
+  fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).then(j => {
+    if (!j || !newerVer(j.v, APP_VER)) return;
+    $('#updVer').textContent = 'v' + String(j.v).slice(0, 12);
+    $('#updBar').hidden = false;
+  }).catch(() => {});
+}
 
 /* ---------- 업무표 사진 (종이 표처럼 굵은 격자, 밝은 색으로 고정) ---------- */
 const IMG = { bg: '#FFFFFF', ink: '#15202B', muted: '#596572', line: '#CDD4DB', frame: '#15202B', keeper: '#0B6E5A', keeperBg: '#D8EFE8', absent: '#B0361F', absentBg: '#FBE3DC', side: '#66717C', sideBg: '#E3E7EB', mark: '#D2A600' };
@@ -3146,6 +3740,11 @@ document.addEventListener('click', e => {
     case 'export': openExport(); break;
     case 'import': openImport(''); break;
     case 'history': openHistory(); break;
+    case 'sendlink': openSendSheet(); break;
+    case 'setme': openMeSheet(null); break;
+    case 'pastelink': openImport(''); break;
+    case 'exportlog': openLogSheet(); break;
+    case 'reload': location.reload(); break;
   }
 });
 document.addEventListener('change', e => {
@@ -3156,13 +3755,31 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet()
 purge();
 render();
 if (!store.ok) toast('이 화면에서는 저장이 안 돼요');
-try {
-  const h = location.hash || '';
-  if (/^#RLF1\./.test(h)) {
-    openImport(h.slice(1));
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
-  }
-} catch (e) {}
+// (v7) 단톡방 링크(#S1.)·명단 코드 링크(#RLF1.)로 열렸으면 바로 맞춘다. 열린 채로 다른 링크를 눌러도(hashchange)
+try { takeHash(); } catch (e) {}
+window.addEventListener('hashchange', () => { try { takeHash(); } catch (e) {} });
+// 새 판 알림: 열 때, 다시 볼 때(10분에 한 번). 다시 볼 때는 오래된 표 경고도 새로 그린다
+checkUpdate();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  checkUpdate();
+  if (ui.tab === 'table' && $('#sheet').hidden && !DR.el) render();
+});
+if (inFrame) downloadsCap();
+// (v7) 같은 폰의 다른 창(탭)에서 링크를 받거나 고치면, 이 창도 저장된 것으로 다시 읽는다(옛 내용으로 덮어쓰지 않게)
+window.addEventListener('storage', e => {
+  if (e.key !== null && ![KEY.base, KEY.days, KEY.sync, KEY.gone].includes(e.key)) return;
+  const b = cleanBase(store.get(KEY.base));
+  if (b) base = b;
+  const ds = store.get(KEY.days);
+  days = ds && typeof ds === 'object' && !Array.isArray(ds) ? ds : {};
+  const sy = store.get(KEY.sync);
+  sync = sy && typeof sy === 'object' && !Array.isArray(sy) ? sy : {};
+  const gm = store.get(KEY.gone);
+  goneMap = gm && typeof gm === 'object' && !Array.isArray(gm) ? gm : {};
+  reindex(); DATA_VER++; ui.pick = null;
+  if ($('#sheet').hidden && !DR.el) render();
+});
 })();
 </script>
 </body>
