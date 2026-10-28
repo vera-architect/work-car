@@ -6,6 +6,12 @@
 <meta name="robots" content="noindex, nofollow">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>릴리프 업무표</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="릴리프표">
+<meta name="application-name" content="릴리프표">
+<meta name="theme-color" content="#F4C400">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -516,6 +522,10 @@ html.locked .applyfloat{display:none}
 .linkbox{font-family:var(--font-num);font-size:12px;line-height:1.4;word-break:break-all}
 .updbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:0 0 8px;padding:8px 12px;border:1.5px solid var(--accent-line);background:var(--accent-bg);border-radius:6px;font-size:14px}
 .updbar .btn{min-height:38px}
+/* v7.1: 카톡 안 브라우저 안내 */
+.kakaobar{display:grid;gap:8px;margin:0 0 8px;padding:10px 12px;border:1.5px solid var(--accent-line);background:var(--accent-bg);border-radius:6px;font-size:14px;line-height:1.5}
+.kakaobar p{margin:0}
+.kakaobar .btn{min-height:40px}
 </style>
 </head>
 <body>
@@ -531,6 +541,7 @@ html.locked .applyfloat{display:none}
       <button role="tab" id="tab-roster" aria-controls="view-roster" data-act="tab" data-v="roster">명단</button>
       <button role="tab" id="tab-cal" aria-controls="view-cal" data-act="tab" data-v="cal">달력</button>
     </nav>
+    <div class="kakaobar" id="kakaoBar" role="status" hidden><p id="kakaoMsg"></p><div class="btns"><button class="btn sm primary" id="kakaoOut">브라우저로 열기</button><button class="btn sm ghost" id="kakaoStay">여기서 그냥 보기</button></div></div>
     <div class="updbar" id="updBar" role="status" hidden><span>새 판(<b id="updVer"></b>)이 나왔어요. 새로고침하면 바로 바뀌어요.</span><button class="btn sm primary" data-act="reload">새로고침</button></div>
   </div>
 </header>
@@ -569,7 +580,7 @@ const TYPE_DEF = Object.fromEntries([...TYPES, ['조퇴', [3, 4]]]); // 예전 �
 const ROUNDS = [1, 2, 3, 4];
 const KEEP_DAYS = 40;
 const KEY = { base: 'relief.base.v1', days: 'relief.days.v1', ui: 'relief.ui.v1', sync: 'relief.sync.v1', gone: 'relief.gone.v1' };
-const APP_VER = '7.0';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
+const APP_VER = '7.1';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
 const ALGO_VER = '6.2';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
 // 단톡방 링크는 늘 공개 주소로 만든다(본인용 화면에서 보내도 동료는 브라우저로 바로 연다)
 const PUBLIC_URL = 'https://vera-architect.github.io/work-car/relief/';
@@ -3756,8 +3767,25 @@ purge();
 render();
 if (!store.ok) toast('이 화면에서는 저장이 안 돼요');
 // (v7) 단톡방 링크(#S1.)·명단 코드 링크(#RLF1.)로 열렸으면 바로 맞춘다. 열린 채로 다른 링크를 눌러도(hashchange)
-try { takeHash(); } catch (e) {}
-window.addEventListener('hashchange', () => { try { takeHash(); } catch (e) {} });
+// (v7.1) 카톡 안 브라우저로 열리면: 카톡 브라우저는 저장 공간이 따로라서, 링크(#S1.·#RLF1.)를 여기서 받지 않고
+// 표 정보가 붙은 주소 그대로 폰 기본 브라우저로 넘긴다(kakaotalk://web/openExternal). 안 넘어가면 버튼으로 다시, 또는 여기서 그냥 보기
+const IN_KAKAO = /KAKAOTALK/i.test(navigator.userAgent || '') && !inFrame;
+let kakaoStay = false;
+function kakaoOut() { try { location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(location.href); } catch (e) {} }
+function kakaoGate() {
+  if (!IN_KAKAO || kakaoStay) return false;
+  const link = /^#(S1|RLF1)\./.test(location.hash || '');
+  $('#kakaoMsg').innerHTML = link
+    ? '<b>폰 기본 브라우저로 여는 중이에요.</b> 표는 브라우저 쪽에 저장돼요. 브라우저에서 열렸으면 이 창은 닫아도 돼요. 안 열리면 아래 버튼을 눌러 주세요.'
+    : '<b>카톡 안 브라우저예요.</b> 여기서 넣은 기록은 크롬·삼성 인터넷 같은 폰 브라우저와 따로 저장돼요. 브라우저로 열어 쓰세요.';
+  $('#kakaoBar').hidden = false;
+  if (link) setTimeout(kakaoOut, 80);
+  return link;
+}
+$('#kakaoOut').addEventListener('click', kakaoOut);
+$('#kakaoStay').addEventListener('click', () => { kakaoStay = true; $('#kakaoBar').hidden = true; try { takeHash(); } catch (e) {} });
+try { if (!kakaoGate()) takeHash(); } catch (e) {}
+window.addEventListener('hashchange', () => { try { if (!kakaoGate()) takeHash(); } catch (e) {} });
 // 새 판 알림: 열 때, 다시 볼 때(10분에 한 번). 다시 볼 때는 오래된 표 경고도 새로 그린다
 checkUpdate();
 document.addEventListener('visibilitychange', () => {
