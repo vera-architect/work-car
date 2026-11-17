@@ -254,6 +254,7 @@ input,textarea{font:inherit;color:inherit}
 .slot.k .sn b{color:var(--keeper)}
 .field{display:grid;gap:6px}
 .field>span{font-size:13px;color:var(--muted);font-weight:700}
+.field select{width:100%;min-height:44px;border:1.5px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--card);color:inherit;font:inherit;font-size:16px}
 .field input,.inrow input,textarea{width:100%;min-height:44px;border:1.5px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--card);font-size:16px}
 textarea{font-family:var(--font-num);font-size:13px;line-height:1.4;resize:vertical;word-break:break-all}
 .inrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
@@ -580,8 +581,8 @@ const TYPE_DEF = Object.fromEntries([...TYPES, ['조퇴', [3, 4]]]); // 예전 �
 const ROUNDS = [1, 2, 3, 4];
 const KEEP_DAYS = 40;
 const KEY = { base: 'relief.base.v1', days: 'relief.days.v1', ui: 'relief.ui.v1', sync: 'relief.sync.v1', gone: 'relief.gone.v1' };
-const APP_VER = '7.1';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
-const ALGO_VER = '6.2';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
+const APP_VER = '8.0';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
+const ALGO_VER = '8.0';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
 // 단톡방 링크는 늘 공개 주소로 만든다(본인용 화면에서 보내도 동료는 브라우저로 바로 연다)
 const PUBLIC_URL = 'https://vera-architect.github.io/work-car/relief/';
 
@@ -654,6 +655,12 @@ function cleanBase(b) {
       const o = { id: p.id, name: p.name.slice(0, 20), role: p.role === '조장' ? '파트장' : p.role };
       if (o.role === '인턴') { if (isDate(p.from)) o.from = p.from; if (isDate(p.to)) o.to = p.to; }
       if (typeof p.home === 'string') o.home = p.home;
+      // (v8) 기간 릴리프 rf = { from, to(없으면 당분간), by(그동안 자리에 설 사람) }
+      if (p.rf && typeof p.rf === 'object' && isDate(p.rf.from) && (!p.rf.to || (isDate(p.rf.to) && p.rf.to >= p.rf.from)) && o.role !== '릴리프') {
+        o.rf = { from: p.rf.from };
+        if (p.rf.to) o.rf.to = p.rf.to;
+        if (idOk(p.rf.by)) o.rf.by = p.rf.by;
+      }
       return o;
     });
   const seats = {};
@@ -665,6 +672,7 @@ function cleanBase(b) {
   const seatIds = new Set(allSeats.map(st => st.id)), seatedIds = new Set(allSeats.map(st => st.pid).filter(Boolean));
   people.forEach(p => { if (p.home && (!seatIds.has(p.home) || seatedIds.has(p.id))) delete p.home; });
   const ids = new Set(people.map(p => p.id));
+  people.forEach(p => { if (p.rf && p.rf.by && (!ids.has(p.rf.by) || p.rf.by === p.id)) delete p.rf.by; });
   const byName = n => (people.find(p => p.name === n) || {}).id || null;
   let turn = b.turn && typeof b.turn === 'object' && isDate(b.turn.date) && ids.has(b.turn.pid) ? Object.assign({ date: b.turn.date, pid: b.turn.pid }, b.turn.exact ? { exact: true } : {}) : null;
   if (!turn && old && DEFAULTS && DEFAULTS.turn && byName(DEFAULTS.turn[1])) turn = { date: DEFAULTS.turn[0], pid: byName(DEFAULTS.turn[1]) };
@@ -744,21 +752,24 @@ function purge() {
   saveDays();
 }
 
-const defaultReliefIds = () => base.people.filter(p => p.role === '릴리프').map(p => p.id);
-function reliefIdsFor(d) {
-  const src = d && Array.isArray(d.reliefs) ? d.reliefs : defaultReliefIds();
+// (v8) 기간 릴리프: 작업자 등을 정한 기간(from~to, to 없으면 당분간) 동안 날마다 기본 릴리프로 넣는다
+const rfOn = (p, k) => !!(p && p.rf && p.role !== '릴리프' && k >= p.rf.from && (!p.rf.to || k <= p.rf.to));
+const rfText = p => (p && p.rf ? `기간 릴리프 ${fmtShort(p.rf.from)}~${p.rf.to ? fmtShort(p.rf.to) : '(당분간)'}` : '');
+const defaultReliefIds = (k = ui.date) => base.people.filter(p => p.role === '릴리프' || rfOn(p, k)).map(p => p.id);
+function reliefIdsFor(d, k = ui.date) {
+  const src = d && Array.isArray(d.reliefs) ? d.reliefs : defaultReliefIds(k);
   const seen = new Set();
   return src.filter(id => P.has(id) && !seen.has(id) && seen.add(id));
 }
 // 적용 전(바꿔 둔) 릴리프 명단 days[날짜].pend. 없으면 지금 적용된 명단
-function pendIdsFor(d) {
-  if (!d || !Array.isArray(d.pend)) return reliefIdsFor(d);
+function pendIdsFor(d, k = ui.date) {
+  if (!d || !Array.isArray(d.pend)) return reliefIdsFor(d, k);
   const seen = new Set();
   return d.pend.filter(id => P.has(id) && !seen.has(id) && seen.add(id));
 }
 const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x));
-function pendDiff(d) {
-  const now = reliefIdsFor(d), next = pendIdsFor(d);
+function pendDiff(d, k = ui.date) {
+  const now = reliefIdsFor(d, k), next = pendIdsFor(d, k);
   return { now, next, add: next.filter(id => !now.includes(id)), del: now.filter(id => !next.includes(id)) };
 }
 // 업무 중(오늘 2R~4R)이면 그 라운드, 아니면 0
@@ -770,8 +781,8 @@ function editDay(fn, opts) {
   if (!d.notes || typeof d.notes !== 'object') d.notes = {};
   if (opts && opts.cond) snapPlan(k, d);
   fn(d);
-  if (Array.isArray(d.reliefs) && sameArr(reliefIdsFor(d), defaultReliefIds())) delete d.reliefs;
-  if (d.pend !== undefined && (!Array.isArray(d.pend) || sameSet(pendIdsFor(d), reliefIdsFor(d)))) delete d.pend;
+  if (Array.isArray(d.reliefs) && sameArr(reliefIdsFor(d, k), defaultReliefIds(k))) delete d.reliefs;
+  if (d.pend !== undefined && (!Array.isArray(d.pend) || sameSet(pendIdsFor(d, k), reliefIdsFor(d, k)))) delete d.pend;
   if (d.starts && !Object.keys(d.starts).length) delete d.starts;
   if (d.fills && (typeof d.fills !== 'object' || !Object.keys(d.fills).length)) delete d.fills;
   if (d.swaps && (typeof d.swaps !== 'object' || !Object.values(d.swaps).some(a => Array.isArray(a) && a.length))) delete d.swaps;
@@ -779,7 +790,7 @@ function editDay(fn, opts) {
   delete d.kstart; // v5 '오늘만 키퍼'는 v6부터 그날 차례(turn)로 친다
   if (d.ring !== undefined && (!Array.isArray(d.ring) || !d.ring.length)) delete d.ring;
   if (!d.turn) delete d.turn;
-  if (d.opt !== undefined && !['two', 'side', 'side2', 'old'].includes(d.opt)) delete d.opt;
+  if (d.opt !== undefined && !['two', 'side', 'side2', 'old', 'ord'].includes(d.opt)) delete d.opt;
   const empty = !d.opt && !Object.keys(d.notes).length && !Array.isArray(d.reliefs) && !Array.isArray(d.pend) && !d.starts && !d.turn && !d.fills && !d.swaps && !d.plan && !d.sent && !d.work && !d.ring;
   if (empty) {
     delete days[k];
@@ -903,6 +914,7 @@ const isWorkDay = k => { const w = workMark(k); return w ? w === 'on' : isWeekda
 function turnList(k) {
   const d = days[k];
   const ids = new Set(reliefOrder());
+  for (const p of base.people) if (rfOn(p, k)) ids.add(p.id); // (v8) 기간 릴리프는 그동안 릴리프처럼 순번에 낀다
   if (d && Array.isArray(d.reliefs)) {
     const nt = d.notes && typeof d.notes === 'object' ? d.notes : {};
     for (const id of d.reliefs) {
@@ -917,15 +929,19 @@ function turnList(k) {
 // 순번은 기준일부터 하루씩 이어서 센다. 기록이 바뀌면(DATA_VER) 처음부터 다시
 let TC = { ver: -1 };
 function turnCache() {
-  if (TC.ver === DATA_VER) return TC;
+  const today = workDayKey();
+  if (TC.ver === DATA_VER && TC.today === today) return TC;
   const isKey = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
   const baseAt = base.turn && isKey(base.turn.date) && P.has(base.turn.pid) ? { date: base.turn.date, pid: base.turn.pid, exact: !!base.turn.exact } : null;
   const dayAt = new Map();
   for (const [dk, d] of Object.entries(days)) if (isKey(dk) && d && d.turn && P.has(d.turn)) dayAt.set(dk, d.turn);
-  const dates = [...dayAt.keys()];
+  // (v8) 표를 남긴 지난 날(오늘 전, 오늘은 보낸 뒤)은 그날 실제 차례(snap.owner)로 고정한다. 나중에 앞 날짜(특근 등)를 넣어도 이미 쓴 날 키퍼는 안 바뀐다
+  const froz = new Map();
+  for (const [dk, d] of Object.entries(days)) if (isKey(dk) && d && (dk < today || (dk === today && d.sent)) && d.snap && typeof d.snap.owner === 'string' && P.has(d.snap.owner)) froz.set(dk, d.snap.owner);
+  const dates = [...dayAt.keys(), ...froz.keys()];
   if (baseAt) dates.push(baseAt.date);
   dates.sort();
-  TC = { ver: DATA_VER, rix: new Map(base.people.map((p, i) => [p.id, i])), baseAt, dayAt, first: dates[0] || null, own: new Map(), last: null };
+  TC = { ver: DATA_VER, today, rix: new Map(base.people.map((p, i) => [p.id, i])), baseAt, dayAt, froz, first: dates[0] || null, own: new Map(), last: null };
   return TC;
 }
 // 출근부에서 바로 아래 사람(맨 아래 다음은 맨 위) / 바로 위 사람(맨 위 앞은 맨 아래)
@@ -963,7 +979,8 @@ function ownerAt(k) {
     const auto = T.baseAt && T.baseAt.date === j
       ? (T.baseAt.exact || !isWorkDay(j) ? T.baseAt.pid : nextIn(T, turnList(j), prevIn(T, base.people.filter(p => p.role === '릴리프' || p.id === T.baseAt.pid).map(p => p.id), T.baseAt.pid)))
       : prev === null ? null : isWorkDay(j) ? nextIn(T, turnList(j), prev) : prev;
-    const owner = T.dayAt.get(j) || auto;
+    const fz = T.froz.get(j) && !(T.baseAt && T.baseAt.date === j) ? T.froz.get(j) : null;
+    const owner = T.dayAt.get(j) || fz || auto;
     T.own.set(j, { owner, auto });
     T.last = j; prev = owner;
   }
@@ -977,7 +994,7 @@ function turnFor(k) {
   let order = turnList(k);
   if (!order.includes(o.owner)) order = base.people.filter(p => p.id === o.owner || order.includes(p.id)).map(p => p.id);
   const nk = nearWork(k, 1), pk = nearWork(k, -1);
-  const roles = new Set(reliefOrder());
+  const roles = new Set(defaultReliefIds(k));
   return {
     order, idx: order.indexOf(o.owner), owner: o.owner, auto: o.auto,
     set: !!(days[k] && days[k].turn) && T.dayAt.get(k) === o.owner && o.owner !== o.auto,
@@ -985,15 +1002,24 @@ function turnFor(k) {
     noAnchor: !T.first, work: isWorkDay(k), added: id => !roles.has(id),
   };
 }
-// 순번 주인이 1R에 없으면 바로 앞 순번부터 거꾸로 찾아 대신 시작
-function starterFor(turn, group, absent) {
+// 순번 주인이 1R에 없으면 바로 앞 순번부터 거꾸로 찾아 대신 시작.
+// (v8) 그 앞 사람이 지난 근무일 키퍼 시작(prevStart)이면 이틀 연속이 되니 다음 순번(아래로)이 대신 시작
+function starterFor(turn, group, absent, prevStart) {
   const here = id => group.includes(id) && !absent(id, 1);
   if (turn) {
     const n = turn.order.length;
+    let back = null;
     for (let s = 0; s < n; s++) {
       const id = turn.order[(((turn.idx - s) % n) + n) % n];
-      if (here(id)) return { id, sub: s > 0 };
+      if (here(id)) { back = { id, sub: s > 0 }; break; }
     }
+    if (back && back.sub && prevStart && back.id === prevStart) {
+      for (let s = 1; s < n; s++) {
+        const id = turn.order[(turn.idx + s) % n];
+        if (here(id) && id !== prevStart) return { id, sub: true, fwd: true, skip: prevStart };
+      }
+    }
+    if (back) return back;
   }
   return { id: group.find(x => !absent(x, 1)) || group[0] || null, sub: false, none: true };
 }
@@ -1007,8 +1033,15 @@ function findSeatById(id) {
 // 릴리프·파트장 등으로 바뀌면서 비워 둔 자리의 원래 주인
 const homeOwner = seatId => base.people.find(p => p.home === seatId && p.role !== '작업자' && p.role !== '인턴') || null;
 // 그날 '오늘만 대신 서는 사람' (자리 id → 사람 id)
-function fillsFor(d) {
+function fillsFor(d, k = ui.date) {
   const out = {};
+  // (v8) 기간 릴리프로 빠진 사람 자리에 그동안 설 사람(rf.by) — 그날 릴리프로 돌 때만
+  const inList = new Set(reliefIdsFor(d, k));
+  for (const p of base.people) {
+    if (!rfOn(p, k) || !p.rf.by || !P.has(p.rf.by) || !inList.has(p.id) || inList.has(p.rf.by)) continue;
+    const s = SEAT.get(p.id);
+    if (s && internActive(P.get(p.rf.by), k)) out[s.seat.id] = p.rf.by;
+  }
   if (!d || !d.fills || typeof d.fills !== 'object') return out;
   for (const [sid, pid] of Object.entries(d.fills)) if (findSeatById(sid) && P.has(pid)) out[sid] = pid;
   return out;
@@ -1034,12 +1067,12 @@ function compute(k = ui.date, opts) {
   const RI = new Map(base.people.map((p, i) => [p.id, i]));
   const ri = id => (RI.has(id) ? RI.get(id) : 1e6);
   // 표는 출근부 순서, 하루 종일 빠진 사람은 맨 아래
-  const rows = reliefIdsFor(d)
+  const rows = reliefIdsFor(d, k)
     .map(id => ({ id, p: P.get(id), note: notes[id] || null, off: ROUNDS.every(r => absent(id, r)) }))
     .sort((a, b) => (a.off - b.off) || (ri(a.id) - ri(b.id)));
   const group = rows.filter(r => !r.off).map(r => r.id);
   const listed = new Set(rows.map(r => r.id));
-  const fills = fillsFor(d);
+  const fills = fillsFor(d, k);
   const vac = [];
   for (const { side, seat } of circleSeats()) {
     if (!seat.pid || !P.has(seat.pid) || !notes[seat.pid]) continue;
@@ -1052,7 +1085,8 @@ function compute(k = ui.date, opts) {
   // ① 키퍼 순번(그날 차례, 1R에 없으면 앞 사람이 대신) ② 번호: 키퍼 시작 0번, 출근부에서 위로
   let turn = turnFor(k);
   if (auto && turn && turn.set && turn.auto && turn.order.includes(turn.auto)) turn = Object.assign({}, turn, { owner: turn.auto, idx: turn.order.indexOf(turn.auto), set: false });
-  const starter = M ? starterFor(turn, group, absent) : { id: null, sub: false };
+  const prevStart = (() => { if (!turn || !turn.prevK) return null; const pd = days[turn.prevK]; const s = pd && pd.snap && pd.snap.used ? pd.snap.used.start : null; return typeof s === 'string' && P.has(s) ? s : null; })();
+  const starter = M ? starterFor(turn, group, absent, prevStart) : { id: null, sub: false };
   const k0 = Math.max(0, group.indexOf(starter.id));
   const nums = group.map((_, i) => group[(((k0 - i) % M) + M) % M]);
   const numOf = new Map(nums.map((id, n) => [id, n]));
@@ -1139,9 +1173,9 @@ function compute(k = ui.date, opts) {
     return { miss, kx, opp, two: tw, inv, uneven, late, X, xb, xa };
   };
   // 안(전략)별로 더 나은 쪽을 고르는 차례
-  const ORD = { rule: ['miss', 'kx', 'opp', 'inv', 'uneven', 'late'], two: ['miss', 'two', 'kx', 'opp', 'inv', 'uneven', 'late'], old: ['miss', 'inv', 'uneven', 'late'] };
+  const ORD = { rule: ['miss', 'inv', 'kx', 'opp', 'uneven', 'late'], two: ['miss', 'two', 'kx', 'opp', 'inv', 'uneven', 'late'], old: ['miss', 'inv', 'uneven', 'late'] };
   const better = (keys, a, b) => { for (const key of keys) if (a[key] !== b[key]) return a[key] < b[key]; return false; };
-  const B = { rule: null, side: null, side2: null, two: null, old: null };
+  const B = { rule: null, side: null, side2: null, two: null, old: null, ord: null };
   let tried = 0;
   const walk = (j, rest, g) => {
     if (tried >= 3000) return;
@@ -1161,19 +1195,117 @@ function compute(k = ui.date, opts) {
     for (let a = 0; a <= rest && tried < 3000; a++) { g.push(a); walk(j + 1, rest - a, g); g.pop(); }
   };
   walk(0, E, []);
+  // (v8) 번호 순 키퍼 안(ord): 원 순서를 자리 위치에 묶지 않고 모든 순서·시작 자리를 따져
+  // [빠짐없이 → 키퍼가 번호 순(1R 0번 → 2R 1번 → 3R 2번 → 4R 3번) → 뒷번호 X 더 → 키퍼 앞뒤 X → 1R 빈자리 번호 순 → X 고르게 → 자리 위치 순]
+  const ordPlan = () => {
+    const rest = jobs.slice(1).concat(Array(E).fill(SIDE));
+    const nR = rest.length, others = nums.slice(1);
+    const nk = nums.filter(id => !absent(id, 1));
+    const jix = new Map(jobs.map((jb, j) => [jb, j]));
+    const nm = id => (P.get(id) || {}).name || '';
+    const byName = group.slice().sort((a, b) => (nm(a) < nm(b) ? -1 : nm(a) > nm(b) ? 1 : 0));
+    const lexLess = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+    let best = null, bestKey = null, count = 0;
+    const CAP = 60000;
+    const score = (ring, pos) => {
+      const st = new Map([[nums[0], 0]]);
+      others.forEach((id, i) => st.set(id, pos[i]));
+      const cov = ROUNDS.map(() => new Set()), X = new Map(), K = [null, null, null, null];
+      for (const id of group) {
+        const s = st.get(id);
+        let x = 0;
+        for (let r = 0; r < 4; r++) {
+          if (absent(id, r + 1)) continue;
+          const p = (s + r) % L;
+          if (ring[p].kind === 'keeper') K[r] = id;
+          if (slotOn(ring[p], r + 1)) cov[r].add(p); else x++;
+        }
+        X.set(id, x);
+      }
+      let miss = 0;
+      for (let r = 0; r < 4; r++) for (let p = 0; p < L; p++) if (slotOn(ring[p], r + 1) && !cov[r].has(p)) miss++;
+      let inv = 0;
+      for (let a = 0; a < M; a++) for (let b = a + 1; b < M; b++) if (X.get(nums[a]) > X.get(nums[b])) inv++;
+      const xv = group.filter(id => !ROUNDS.some(r => absent(id, r))).map(id => X.get(id));
+      const xeven = xv.length ? Math.max(...xv) - Math.min(...xv) : 0;
+      const vac1 = ring.filter(sl => sl.kind === 'seat' && sl.rounds.includes(1)).sort((a, b) => ri(a.pid) - ri(b.pid));
+      const holder = new Map();
+      for (const id of group) { const sl = ring[st.get(id)]; if (sl.kind === 'seat' && sl.rounds.includes(1)) holder.set(sl, id); }
+      const exp = others.filter(id => !absent(id, 1));
+      let v1r = 0;
+      vac1.forEach((sl, i) => { if (i < exp.length && holder.get(sl) !== exp[i]) v1r++; });
+      const xb = L > 1 && ring[L - 1].kind === 'side', xa = L > 1 && ring[1 % L].kind === 'side';
+      const kx = (E >= 1 && !xb ? 1 : 0) + (E >= 2 && !xa ? 1 : 0);
+      let kord = 0;
+      for (let r = 1; r < 4; r++) if (r < nk.length && K[r] !== nk[r]) kord++;
+      const sj = ring.filter(sl => sl.kind === 'seat').map(sl => jix.get(sl));
+      let geo = 0;
+      for (let a = 0; a < sj.length; a++) for (let b = a + 1; b < sj.length; b++) if (sj[a] > sj[b]) geo++;
+      const key = [miss, kord, inv, kx, v1r, xeven, geo, ...byName.map(id => st.get(id))];
+      if (!bestKey || lexLess(key, bestKey)) { bestKey = key; best = { ring: ring.slice(), st }; }
+    };
+    // 먼저 키퍼가 번호 순이 되는 자리만 따진다(r번째 키퍼는 1R에 키퍼 칸에서 r칸 앞). 빠짐없이(바닥값)·번호 순이 되면 그게 가장 나은 안이고,
+    // 안 되면 모든 자리를 따진다(같은 차례로 돌기 때문에 고르는 안은 같다)
+    let fixP = null;
+    const evalRing = ring => {
+      const pos = [], usedP = new Array(L).fill(false);
+      const rec = i => {
+        if (count >= CAP) return;
+        if (i === others.length) { count++; score(ring, pos); return; }
+        const want = fixP ? fixP.get(others[i]) : undefined;
+        for (let p = 1; p < L; p++) {
+          if (usedP[p] || (want !== undefined && p !== want) || (want === undefined && fixP && fixP.taken.has(p))) continue;
+          usedP[p] = true; pos.push(p); rec(i + 1); pos.pop(); usedP[p] = false;
+        }
+      };
+      rec(0);
+    };
+    const seen = new Set(), used = new Array(nR).fill(false), perm = [];
+    const recR = () => {
+      if (count >= CAP) return;
+      if (perm.length === nR) {
+        const ring = [jobs[0], ...perm.map(i => rest[i])];
+        const key = ring.map(sl => (sl.kind === 'seat' ? 's' + sl.seat.id : sl.kind)).join(',');
+        if (seen.has(key)) return;
+        seen.add(key); evalRing(ring); return;
+      }
+      for (let i = 0; i < nR; i++) { if (used[i]) continue; used[i] = true; perm.push(i); recR(); perm.pop(); used[i] = false; }
+    };
+    fixP = new Map();
+    fixP.taken = new Set();
+    for (let r = 1; r < Math.min(4, nk.length); r++) if (L - r >= 1) { fixP.set(nk[r], L - r); fixP.taken.add(L - r); }
+    // 빠짐없이의 바닥값: 라운드마다 (그 라운드 일 칸 수 − 있는 사람 수)만큼은 못 메운다
+    let lb = 0;
+    for (let r = 1; r <= 4; r++) lb += Math.max(0, [jobs[0], ...rest].filter(sl => slotOn(sl, r)).length - group.filter(id => !absent(id, r)).length);
+    const full = () => { best = null; bestKey = null; count = 0; seen.clear(); fixP = null; recR(); };
+    if (fixP.size) {
+      recR();
+      const ok = best && bestKey[0] === lb && bestKey[1] === 0;
+      if (!ok) { if (L <= 6) full(); else return null; } // 7칸 넘게는 번호 순이 될 때만 안으로 낸다(폰에서 느려지지 않게)
+    } else if (L <= 6) full(); else return null;
+    if (!best) return null;
+    const ring = best.ring;
+    const pl = { ring, jobPos: jobs.map(jb => ring.indexOf(jb)), st: best.st };
+    const g = jobs.map(() => 0);
+    let last = 0;
+    ring.forEach(sl => { if (sl.kind === 'side') g[last]++; else last = jix.get(sl); });
+    pl.g = g; pl.r = rate(pl);
+    return pl;
+  };
+  B.ord = M > 1 && L <= 7 ? ordPlan() : null;
   // 배치 안: 같은 배치는 하나만, 3개까지(지금 쓰는 안은 꼭 넣는다)
   const plKey = pl => pl.ring.map(ringRef).join(',') + '|' + group.map(id => pl.st.get(id)).join(',');
   const want = (opts && opts.opt) || d.opt || 'rule';
   const best = B[want] || B.rule;
   const optAll = [];
-  for (const id of ['rule', 'two', 'side', 'old', 'side2']) {
+  for (const id of ['rule', 'ord', 'old', 'two', 'side', 'side2']) {
     const pl = B[id];
     if (!pl || optAll.some(o => o.key === plKey(pl))) continue;
     optAll.push({ id, key: plKey(pl), pl });
   }
-  let optList = optAll.slice(0, 3);
+  let optList = optAll.slice(0, 4);
   const wantKey = plKey(best);
-  if (!optList.some(o => o.key === wantKey)) optList = optList.slice(0, 2).concat(optAll.filter(o => o.key === wantKey));
+  if (!optList.some(o => o.key === wantKey)) optList = optList.slice(0, 3).concat(optAll.filter(o => o.key === wantKey));
   const bestR = best.r;
   // 원 그림에서 칸끼리 맞바꾼 순서(days[날짜].ring)가 있으면 그 순서로. 사람 자리는 같은 규칙으로 다시 고른다
   const placeOn = want === 'old' ? placeOld : placeRule;
@@ -1332,7 +1464,7 @@ function seatInfo(c) {
     if (!owner) { const h = homeOwner(seat.id); state = 'empty'; why = h ? `${h.name} 자리 · ${h.role}` : '비어 있음'; }
     else if (!internActive(owner, c.k)) { state = 'away'; why = '인턴 기간 아님'; }
     else if (owner.role !== '작업자' && owner.role !== '인턴') { state = 'away'; why = owner.role; }
-    else if (listed.has(owner.id)) { state = 'away'; why = '오늘 릴리프'; }
+    else if (listed.has(owner.id)) { state = 'away'; why = rfOn(owner, c.k) ? '기간 릴리프' : '오늘 릴리프'; }
     else if (c.notes[owner.id]) { state = 'absent'; why = noteLabel(c.notes[owner.id]); }
     const need = (state === 'away' || state === 'empty') && !fill;
     map.set(seat.id, { side, seat, owner, fill, state, why, need, gap: gapIds.has(seat.id), covered: vacIds.has(seat.id) });
@@ -1483,7 +1615,7 @@ function renderTable() {
   const offRelief = c.rows.filter(r => r.off && r.p.role === '릴리프');
   // 릴리프 인원을 바꿔 두면(적용 전) 적용 버튼이 켜진다
   const pd = pendDiff(c.d), pending = pd.add.length + pd.del.length > 0;
-  const shortInfo = !pending && offRelief.length && c.M < reliefOrder().length ? `
+  const shortInfo = !pending && offRelief.length && c.M < defaultReliefIds(c.k).length ? `
       <div class="info"><p><b>${offRelief.map(r => `${esc(r.p.name)} ${esc(r.note.type)}`).join(', ')}</b> · 오늘 도는 사람이 ${c.M}명이에요. 대신 들어갈 사람을 넣어 주세요.</p>
         <div class="btns"><button class="btn sm" data-act="addrelief">+ 대신 넣기</button>${backupBtn}</div></div>` : '';
 
@@ -1532,7 +1664,7 @@ function renderTable() {
   const noOf = row => (row.off || !c.numOf.has(row.id) ? 99 : c.numOf.get(row.id));
   const subsOf = (id, note) => {
     const p = P.get(id), s = SEAT.get(id), subs = [];
-    if (p.role !== '릴리프') subs.push(p.role);
+    if (p.role !== '릴리프') subs.push(rfOn(p, ui.date) ? rfText(p) : p.role);
     if (s) subs.push(`원래 자리 ${s.side} ${s.seat.station}`);
     if (note) subs.push(noteLabel(note));
     return subs;
@@ -1603,7 +1735,7 @@ function whyCard(c) {
     else if (t.set) line = `오늘은 <b>${esc(owner)}</b>${how} 차례로 직접 정했어요${t.auto ? `(순번대로면 ${esc(nameOf(t.auto))})` : ''}.`;
     else if (!t.work) line = `오늘은 <b>${esc(owner)}</b> 차례예요.`;
     else line = `지난 근무일(${fmtShort(t.prevK)})은 <b>${esc(prv)}</b>, 오늘은 출근부에서 바로 아래 <b>${esc(owner)}</b>${how} 차례예요.`;
-    if (c.starter.sub) line += ` ${esc(ga(owner))} 빠져서 앞 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요. 순번은 ${esc(owner)} 몫으로 쳐요.`;
+    if (c.starter.sub) line += ` ${esc(ga(owner))} 빠져서 ${c.starter.fwd ? `다음 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요(앞 순번 ${esc(nameOf(c.starter.skip))}${esc(eun(nameOf(c.starter.skip)).slice(-1))} 지난 근무일 키퍼라 이틀 연속이 안 되게).` : `앞 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요.`} 순번은 ${esc(owner)} 몫으로 쳐요.`;
     if (!t.noAnchor) line += ` 다음 근무일(${fmtShort(t.nextK)})은 <b>${esc(nxt)}</b> 차례예요.`;
     const wm = workMark(c.k);
     if (!t.work) line += ` ${wm === 'off' ? '휴무로 정한 날이라' : '주말이라'} 순번을 넘기지 않았어요.${wm ? '' : " 특근이면 아래 '이 날 특근'을 눌러 주세요."}`;
@@ -1665,7 +1797,7 @@ function ringCard(c, prev) {
     const cur = o.id === c.optCur, on = o.id === shown;
     return `<button class="optc${cur ? ' cur' : ''}${on ? ' on' : ''}" data-act="optpick" data-v="${o.id}" role="radio" aria-checked="${on}"><span class="oh"><b>안 ${i + 1} · ${esc(optTitle(c, o))}</b>${cur ? '<i class="otag">지금</i>' : ''}${pk && pk.opt === o.id ? '<i class="otag pk">고름 · 적용 전</i>' : ''}</span><span class="od">${esc(optDesc(c, o))}</span><span class="or">${esc(o.ring.join(' → '))}</span><span class="ox">X ${esc(o.x.map(([pid, x]) => `${shortName(nameOf(pid))}${x}`).join(' · '))}</span></button>`;
   }).join('');
-  const optNote = c.E === 0 ? '오늘은 X 칸이 없어서 자리 순서대로 돌아요.'
+  const optNote = c.E === 0 && c.opts.length < 2 ? '오늘은 X 칸이 없어서 자리 순서대로 돌아요.'
     : !c.optCur ? '원 그림에서 직접 바꾼 배치를 쓰는 중이에요. 안을 골라 적용하면 직접 바꾼 건 지워져요.'
     : '안을 누르면 아래 원에 미리 보여요. 화면 아래 <b>적용</b>을 눌러야 업무표에 들어가요. 적용한 뒤에도 칸·이름표를 길게 눌러 바꿀 수 있어요.';
   const rc = prev || c;
@@ -1872,6 +2004,7 @@ function optTitle(c, o) {
   if (o.id === 'rule') return '규칙대로';
   if (o.id === 'two') return '2번이 2R 키퍼';
   if (o.id === 'old') return '예전 방식(X 고르게)';
+  if (o.id === 'ord') return '번호 순 키퍼';
   const r0 = (c.opts.find(x => x.id === 'rule') || {}).r;
   const same = x => r0 && x.r.kx === r0.kx && x.r.opp === r0.opp;
   if (o.id === 'side') return same(o) ? '반대쪽' : '다른 배치';
@@ -1885,6 +2018,7 @@ function optDesc(c, o) {
   if (o.oneVac) t.push(o.r.opp <= c.L % 2 ? '1번 맞은편' : '1번 맞은편 아님');
   if (o.k2) t.push(`2R 키퍼 ${shortName(nameOf(o.k2))}`);
   if (o.id === 'old') t.push('번호 순서대로 X 고르게');
+  if (o.id === 'ord') t.push('키퍼가 1R 0번 → 2R 1번 → 3R 2번 → 4R 3번');
   return t.join(' · ');
 }
 // 골라 둔 배치 안(적용 전) — 그 날짜에만
@@ -2017,6 +2151,7 @@ function renderRoster() {
     else if (home) bits.push(`원래 자리 ${home.side} ${home.seat.station} (공석)`);
     else if (p.role === '작업자' || p.role === '인턴') bits.push('자리 없음');
     if (p.role === '인턴' && (p.from || p.to)) bits.push(`${p.from ? fmtShort(p.from) : ''}~${p.to ? fmtShort(p.to) : ''}${internActive(p, ui.date) ? '' : ' 기간 아님'}`);
+    if (p.rf) bits.push(rfText(p) + (rfOn(p, ui.date) ? '' : ' · 기간 아님'));
     const away = listed.has(p.id) && p.role !== '릴리프';
     if (away) bits.push(s ? '오늘 릴리프 · 자리 공석' : '오늘 릴리프');
     if (base.backup === p.id) bits.push('모자랄 때 먼저 넣을 사람');
@@ -2308,12 +2443,56 @@ function openReliefSheet(pid) {
       const id = t.dataset.v;
       onSheetClose = null;
       closeSheet();
+      const np = P.get(id);
+      if (!pid && np && np.role !== '릴리프' && !rfOn(np, ui.date)) { openPeriodAsk(id); return; } // (v8) 오늘만 / 기간으로
       stageRoster(arr => {
         if (pid) { const i = arr.indexOf(pid); if (i >= 0) arr[i] = id; else arr.push(id); } else arr.push(id);
         return arr;
       }, pid ? `${P.get(pid).name} → ${P.get(id).name}` : `${P.get(id).name} 넣음`);
     };
   }, () => render());
+}
+// (v8) 작업자 등을 릴리프로 넣을 때: 오늘만 / 이번 주 금요일까지 / 당분간 / 날짜까지
+function openPeriodAsk(id) {
+  const p = P.get(id), k = ui.date;
+  if (!p) return;
+  const wd = parseKey(k).getDay(), fri = addDays(k, (5 - wd + 7) % 7);
+  openSheet(`${p.name} 릴리프로 넣기`, `
+    <p class="hint"><b>오늘만</b> 넣거나 <b>기간</b>으로 넣을 수 있어요. 기간으로 넣으면 그동안 날마다 저절로 릴리프에 들어가고 키퍼 순번에도 껴요. 끝나면 저절로 빠져요. ${SEAT.get(id) ? '원래 자리는 그동안 공석(!)이에요. 그 자리에 설 사람(인턴 등)은 명단에서 이 사람을 눌러 정해요.' : ''}</p>
+    <div class="btns"><button class="btn primary" data-s="today">오늘만</button>${fri > k ? `<button class="btn" data-s="fri">${fmtShort(fri)}(금)까지</button>` : ''}<button class="btn" data-s="open">당분간</button></div>
+    <div class="field"><span>끝나는 날 정하기</span><div class="inrow"><input type="date" id="rfUntil" min="${k}" value="${fri}" aria-label="끝나는 날"><button class="btn" data-s="until">이날까지</button></div></div>`, b => {
+    b.onclick = e => {
+      const t = e.target.closest('[data-s]');
+      if (!t) return;
+      const s = t.dataset.s;
+      if (s === 'today') { onSheetClose = null; closeSheet(); stageRoster(arr => { arr.push(id); return arr; }, `${p.name} 넣음`); return; }
+      let to = null;
+      if (s === 'fri') to = fri;
+      else if (s === 'until') { to = (b.querySelector('#rfUntil') || {}).value || ''; if (!/^\d{4}-\d{2}-\d{2}$/.test(to) || to < k) { toast('끝나는 날을 오늘이나 그 뒤로 골라 주세요'); return; } }
+      else if (s !== 'open') return;
+      onSheetClose = null; closeSheet();
+      setPeriod(p, Object.assign({ from: k }, to ? { to } : {}, p.rf && p.rf.by ? { by: p.rf.by } : {}), `${p.name} 기간 릴리프 ${fmtShort(k)}~${to ? fmtShort(to) : '(당분간)'}`);
+    };
+  }, () => render());
+}
+// 기간 릴리프를 바꿀 때 보고 있는 날 표는 바로 바뀌지 않게: 그날은 바뀐 명단을 '적용 전'으로 둔다
+function setPeriod(p, rf, label) {
+  const k = ui.date, beforeB = JSON.stringify(base), beforeD = snapDay(k);
+  const oldList = reliefIdsFor(days[k], k);
+  if (rf) p.rf = rf; else delete p.rf;
+  saveBase();
+  const d = days[k];
+  if (!(d && Array.isArray(d.reliefs))) {
+    const now = defaultReliefIds(k);
+    if (!sameArr(oldList, now)) editDay(dd => { dd.reliefs = oldList.slice(); dd.pend = now.slice(); });
+  } else {
+    const pend = pendIdsFor(d, k);
+    if (rfOn(p, k) && !pend.includes(p.id)) editDay(dd => { dd.pend = pend.concat(p.id); });
+    else if (!rfOn(p, k) && pend.includes(p.id) && !reliefIdsFor(d, k).includes(p.id)) editDay(dd => { dd.pend = pend.filter(x => x !== p.id); });
+  }
+  render();
+  const dd = days[k];
+  toast(`${label}${dd && Array.isArray(dd.pend) ? " · 오늘은 '적용'을 누르면 들어가요" : ''}`, () => { const b = cleanBase(JSON.parse(beforeB)); if (b) { base = b; saveBase(); } restoreDay(beforeD); });
 }
 function removeRelief(pid) {
   const p = P.get(pid);
@@ -2558,6 +2737,7 @@ function openPersonSheet(pid) {
     const val = (sel, dflt) => { const el = body.querySelector(sel); return el ? el.value : dflt; };
     const name = val('#pName', p ? p.name : '');
     const from = val('#pFrom', (p && p.from) || ''), to = val('#pTo', (p && p.to) || '');
+    const rfF = val('#rfFrom', (p && p.rf && p.rf.from) || ''), rfT = val('#rfTo', (p && p.rf && p.rf.to) || ''), rfB = val('#rfBy', (p && p.rf && p.rf.by) || '');
     const bkEl = body.querySelector('#pBackup');
     const bk = bkEl ? bkEl.checked : !!(p && base.backup === p.id);
     const idx = p ? base.people.indexOf(p) : -1;
@@ -2576,6 +2756,9 @@ function openPersonSheet(pid) {
       ${p && !seated && (s || home) ? `<p class="hint">원래 자리 <b>${seatTxt}</b> · 다시 작업자로 바꾸면 제자리로 돌아가요.</p>` : ''}
       ${p && seated && p.role !== '작업자' && p.role !== '인턴' && home ? `<p class="hint">저장하면 원래 자리 <b>${seatTxt.replace(' (지금 공석)', '')}</b>로 돌아가요.</p>` : ''}
       ${p && !seated && (p.role === '작업자' || p.role === '인턴') && s ? `<p class="hint">저장하면 ${s.side} ${esc(s.seat.station)}는 공석(!)이 되고, 다시 작업자로 바꾸면 제자리로 돌아와요.</p>` : ''}
+      ${p && role !== '릴리프' ? `<div class="field"><span>기간 릴리프 (끝나는 날을 비우면 당분간)</span><div class="dates"><input type="date" id="rfFrom" value="${esc(rfF)}" aria-label="기간 릴리프 시작일"><span>~</span><input type="date" id="rfTo" value="${esc(rfT)}" aria-label="기간 릴리프 끝나는 날"></div>
+        ${s || home ? `<label class="field"><span>그동안 ${s ? `${s.side} ${esc(s.seat.station)}` : '원래 자리'}에 설 사람</span><select id="rfBy"><option value="">없음 · 공석(!)</option>${base.people.filter(x => x.id !== p.id && x.role !== '릴리프' && (x.role === '그룹장' || x.role === '파트장' || !SEAT.get(x.id))).map(x => `<option value="${x.id}"${x.id === rfB ? ' selected' : ''}>${esc(x.name)} (${esc(x.role)})</option>`).join('')}</select></label>` : ''}
+        ${p.rf ? `<div class="btns"><button class="btn sm ghost" data-s="rfend">기간 끝내기 (${esc(fmtShort(addDays(ui.date, -1)))}까지)</button></div>` : ''}</div>` : ''}
       ${p ? `<label class="check"><input type="checkbox" id="pBackup" ${bk ? 'checked' : ''}> 인원이 모자랄 때 먼저 넣을 사람</label>` : ''}
       <div class="btns"><button class="btn primary" data-s="save">${p ? '저장' : '추가'}</button>${p ? `<button class="btn danger" data-s="del">${armed ? '한 번 더 누르면 빼기' : '명단에서 빼기'}</button>` : ''}</div>`;
   };
@@ -2593,6 +2776,10 @@ function openPersonSheet(pid) {
         saveBase(); renderRoster(); draw();
       } else if (s === 'seatpick') {
         closeSheet(); openSeatPicker(p.id);
+      } else if (s === 'rfend') {
+        const y = addDays(ui.date, -1);
+        onSheetClose = null; closeSheet();
+        setPeriod(p, p.rf.from <= y ? Object.assign({}, p.rf, { to: y }) : null, `${p.name} 기간 릴리프 끝 · ${fmtShort(ui.date)}부터 원래대로`);
       } else if (s === 'save') {
         const name = (body.querySelector('#pName').value || '').trim().slice(0, 12);
         if (!name) { toast('이름을 넣어 주세요'); return; }
@@ -2600,6 +2787,10 @@ function openPersonSheet(pid) {
         const from = role === '인턴' ? ((body.querySelector('#pFrom') || {}).value || '') : '';
         const to = role === '인턴' ? ((body.querySelector('#pTo') || {}).value || '') : '';
         if (from && to && from > to) { toast('끝나는 날이 시작일보다 빨라요'); return; }
+        const rfEl = id => ((body.querySelector(id) || {}).value || '');
+        let rfF = rfEl('#rfFrom'), rfT = rfEl('#rfTo'), rfB = rfEl('#rfBy');
+        if (!rfF && rfT) rfF = ui.date;
+        if (rfF && rfT && rfF > rfT) { toast('기간 릴리프 끝나는 날이 시작일보다 빨라요'); return; }
         const seated = role === '작업자' || role === '인턴';
         if (!p) {
           const np = { id: uid(), name, role };
@@ -2611,6 +2802,9 @@ function openPersonSheet(pid) {
           return;
         }
         let msg = '';
+        // (v8) 기간 릴리프가 바뀌면 보고 있는 날 표는 '적용 전'으로(setPeriod) — 이름·역할은 아래에서 같이 저장
+        const newRf = role !== '릴리프' && rfF ? Object.assign({ from: rfF }, rfT ? { to: rfT } : {}, rfB ? { by: rfB } : {}) : null;
+        const rfChanged = JSON.stringify(p.rf || null) !== JSON.stringify(newRf);
         p.name = name; p.role = role;
         if (role === '인턴') { if (from) p.from = from; else delete p.from; if (to) p.to = to; else delete p.to; }
         else { delete p.from; delete p.to; }
@@ -2630,6 +2824,7 @@ function openPersonSheet(pid) {
         }
         const bkEl = body.querySelector('#pBackup');
         if (bkEl) { if (bkEl.checked) base.backup = p.id; else if (base.backup === p.id) base.backup = null; }
+        if (rfChanged) { onSheetClose = null; closeSheet(); setPeriod(p, newRf, `${name} 저장했어요${newRf ? ` · ${rfText(Object.assign({}, p, { rf: newRf }))}` : ' · 기간 릴리프 없음'}${msg}`); return; }
         saveBase(); closeSheet(); toast(`${name} 저장했어요${msg}`);
       } else if (s === 'del') {
         if (!armed) { armed = true; draw(); return; }
@@ -3061,7 +3256,7 @@ function cleanDay(d, pids, sids) {
     o.plan = Object.assign({ at: Math.max(1, Math.min(5, Number(d.plan.at) || 1)), cells }, d.plan.fresh ? { fresh: true } : {});
   }
   if (Array.isArray(d.ring)) o.ring = d.ring.filter(r => refOk(r) && r !== '-').slice(0, 60);
-  if (['two', 'side', 'side2', 'old'].includes(d.opt)) o.opt = d.opt;
+  if (['two', 'side', 'side2', 'old', 'ord'].includes(d.opt)) o.opt = d.opt;
   if (d.work === 'on' || d.work === 'off') o.work = d.work;
   if (d.sent) o.sent = true;
   o.t = Number(d.t) > 0 ? Number(d.t) : 0;
@@ -3194,7 +3389,7 @@ async function openSendSheet() {
 /* ================= (v7) 기록 내보내기 =================
    40일 기록을 JSON 파일 하나로. 날마다 그날 조건, 앱이 규칙대로 짠 표(appTable), 실제로 쓴 표(usedTable),
    손으로 바꾼 것(edits), 둘의 차이(diff), 사람이 읽는 표(text). AI에게 주고 규칙(알고리즘)을 고칠 때 쓴다. */
-const OPT_NAME = { rule: '규칙대로', two: '2번이 2R 키퍼', side: '반대쪽(다른 배치)', side2: '반대쪽 2(다른 배치 2)', old: '예전 방식(X 고르게)' };
+const OPT_NAME = { rule: '규칙대로', two: '2번이 2R 키퍼', side: '반대쪽(다른 배치)', side2: '반대쪽 2(다른 배치 2)', old: '예전 방식(X 고르게)', ord: '번호 순 키퍼' };
 const seatLabel = sid => { const f = findSeatById(sid); return f ? `${f.side} ${f.seat.station}` : '(없는 자리)'; };
 function refWord(ref, pid, d) {
   if (ref === 'K') return '키퍼';
@@ -3280,8 +3475,8 @@ function buildLog() {
       '릴리프 업무표 앱에서 내보낸 기록입니다. days에 날짜마다 그날 조건(notes 특이사항·reliefs 그날 릴리프·vacancies 빈자리), 앱이 규칙대로 짠 표(appTable), 실제로 쓴 표(usedTable), 사람이 손으로 바꾼 것(edits), 둘의 차이(diff), 사람이 읽는 표(text)가 있습니다.',
       '표 칸: 키퍼 = 라인 맨 뒤 최종 확인, X = 사이드(대기), "○○ 자리" = 그날 빠진 ○○의 자리를 메움, 연차·조퇴 등 = 그 사람이 그 라운드에 빠짐. 라운드는 1R~4R.',
       '번호(no): 그날 키퍼 시작 = 0번, 오늘 도는 사람을 출근부 순서로 놓고 위로 1·2·3(맨 위 다음은 맨 아래). 1번부터 1R 빈자리에 들어가고, 뒷번호일수록 X를 같거나 더 받습니다.',
-      '키퍼 순번(keeper): 근무일마다 지난 근무일 차례의 출근부 바로 아래 사람. 그날 들어온 사람도 출근부 자리대로 낍니다. 차례인 사람이 1R에 없으면 앞 사람이 대신 시작(startedInstead). setByHand = 그날 차례를 손으로 정함.',
-      '원 배치 규칙(v6.2): 원 = 키퍼 → LH 맨 아래→맨 위 → RH 맨 위→맨 아래, 라운드마다 한 칸씩. 키퍼 앞뒤 X(X 하나면 앞), 1번은 키퍼 맞은편, 2번은 키퍼 바로 앞(2R 키퍼), 말번은 키퍼 바로 뒤, 3번은 1번 다음(키퍼 쪽).',
+      '키퍼 순번(keeper): 근무일마다 지난 근무일 차례의 출근부 바로 아래 사람. 그날 들어온 사람·기간 릴리프도 출근부 자리대로 낍니다. 표를 남긴 지난 날의 차례는 고정(v8). 차례인 사람이 1R에 없으면 앞 사람이 대신 시작(startedInstead), 앞 사람이 지난 근무일 키퍼면 다음 사람(v8). setByHand = 그날 차례를 손으로 정함.',
+      '원 배치 규칙(v8): 원 = 키퍼 → LH 맨 아래→맨 위 → RH 맨 위→맨 아래, 라운드마다 한 칸씩. 뒷번호가 X를 같거나 더(먼저) → 키퍼 앞뒤 X(X 하나면 앞) → 1번은 키퍼 맞은편, 2번은 키퍼 바로 앞(2R 키퍼), 말번은 키퍼 바로 뒤. 배치 안 번호 순 키퍼(ord) = 원 순서를 바꿔 1R 0번 → 2R 1번 → 3R 2번 → 4R 3번이 키퍼.',
       'appTable.from이 "그날 저장"이면 그날 앱이 실제로 내놓은 표, "지금 다시 계산"이면 v7 전에 만든 기록이라 지금 규칙으로 다시 계산한 표입니다. algo는 그 표를 짠 규칙의 판입니다.',
       '규칙을 고치려면 diff와 edits가 많은 날을 보고, 사람이 왜 앱 표를 바꿨는지(어떤 조건에서 어떤 칸을 옮겼는지) 공통점을 찾으면 됩니다.',
     ],
@@ -3294,7 +3489,7 @@ function buildLog() {
     shift: base.shift ? { week: base.shift.week, kind: base.shift.kind } : null,
     keeperBase: base.turn ? { date: base.turn.date, name: nameOf(base.turn.pid) } : null,
     backup: nameOf(base.backup) || null,
-    roster: base.people.map((p, i) => { const s = SEAT.get(p.id); return Object.assign({ order: i + 1, name: p.name, role: p.role }, s ? { seat: `${s.side} ${s.seat.station}` } : {}, p.from ? { from: p.from } : {}, p.to ? { to: p.to } : {}); }),
+    roster: base.people.map((p, i) => { const s = SEAT.get(p.id); return Object.assign({ order: i + 1, name: p.name, role: p.role }, s ? { seat: `${s.side} ${s.seat.station}` } : {}, p.from ? { from: p.from } : {}, p.to ? { to: p.to } : {}, p.rf ? { reliefPeriod: { from: p.rf.from, to: p.rf.to || null, standIn: nameOf(p.rf.by) || null } } : {}); }),
     seats: { RH: seatList('RH'), LH: seatList('LH') },
     days: keys.map(dayLog),
   };
