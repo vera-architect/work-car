@@ -581,8 +581,8 @@ const TYPE_DEF = Object.fromEntries([...TYPES, ['조퇴', [3, 4]]]); // 예전 �
 const ROUNDS = [1, 2, 3, 4];
 const KEEP_DAYS = 40;
 const KEY = { base: 'relief.base.v1', days: 'relief.days.v1', ui: 'relief.ui.v1', sync: 'relief.sync.v1', gone: 'relief.gone.v1' };
-const APP_VER = '8.0';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
-const ALGO_VER = '8.0';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
+const APP_VER = '8.1';   // 앱 판. 공개 주소의 version.json이 더 새 판이면 '새로고침' 알림
+const ALGO_VER = '8.1';  // 표 짜는 규칙(계산)의 판. 기록에 '앱이 짠 표'와 함께 남긴다
 // 단톡방 링크는 늘 공개 주소로 만든다(본인용 화면에서 보내도 동료는 브라우저로 바로 연다)
 const PUBLIC_URL = 'https://vera-architect.github.io/work-car/relief/';
 
@@ -1002,24 +1002,18 @@ function turnFor(k) {
     noAnchor: !T.first, work: isWorkDay(k), added: id => !roles.has(id),
   };
 }
-// 순번 주인이 1R에 없으면 바로 앞 순번부터 거꾸로 찾아 대신 시작.
-// (v8) 그 앞 사람이 지난 근무일 키퍼 시작(prevStart)이면 이틀 연속이 되니 다음 순번(아래로)이 대신 시작
+// 순번 주인이 1R에 없으면
+// (v8.1) 지난 근무일 1R 키퍼(prevStart)가 대신 시작. 그 사람도 없거나 지난 근무일 표가 없으면 바로 앞 순번부터 거꾸로 찾는다
 function starterFor(turn, group, absent, prevStart) {
   const here = id => group.includes(id) && !absent(id, 1);
   if (turn) {
     const n = turn.order.length;
-    let back = null;
-    for (let s = 0; s < n; s++) {
+    if (here(turn.owner)) return { id: turn.owner, sub: false };
+    if (prevStart && prevStart !== turn.owner && here(prevStart)) return { id: prevStart, sub: true, prev: true };
+    for (let s = 1; s < n; s++) {
       const id = turn.order[(((turn.idx - s) % n) + n) % n];
-      if (here(id)) { back = { id, sub: s > 0 }; break; }
+      if (here(id)) return { id, sub: true };
     }
-    if (back && back.sub && prevStart && back.id === prevStart) {
-      for (let s = 1; s < n; s++) {
-        const id = turn.order[(turn.idx + s) % n];
-        if (here(id) && id !== prevStart) return { id, sub: true, fwd: true, skip: prevStart };
-      }
-    }
-    if (back) return back;
   }
   return { id: group.find(x => !absent(x, 1)) || group[0] || null, sub: false, none: true };
 }
@@ -1735,7 +1729,7 @@ function whyCard(c) {
     else if (t.set) line = `오늘은 <b>${esc(owner)}</b>${how} 차례로 직접 정했어요${t.auto ? `(순번대로면 ${esc(nameOf(t.auto))})` : ''}.`;
     else if (!t.work) line = `오늘은 <b>${esc(owner)}</b> 차례예요.`;
     else line = `지난 근무일(${fmtShort(t.prevK)})은 <b>${esc(prv)}</b>, 오늘은 출근부에서 바로 아래 <b>${esc(owner)}</b>${how} 차례예요.`;
-    if (c.starter.sub) line += ` ${esc(ga(owner))} 빠져서 ${c.starter.fwd ? `다음 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요(앞 순번 ${esc(nameOf(c.starter.skip))}${esc(eun(nameOf(c.starter.skip)).slice(-1))} 지난 근무일 키퍼라 이틀 연속이 안 되게).` : `앞 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요.`} 순번은 ${esc(owner)} 몫으로 쳐요.`;
+    if (c.starter.sub) line += ` ${esc(ga(owner))} 빠져서 ${c.starter.prev ? `지난 근무일 1R 키퍼 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요.` : `앞 순번 <b>${esc(ga(nameOf(c.starter.id)))}</b> 대신 시작해요.`} 순번은 ${esc(owner)} 몫으로 쳐요.`;
     if (!t.noAnchor) line += ` 다음 근무일(${fmtShort(t.nextK)})은 <b>${esc(nxt)}</b> 차례예요.`;
     const wm = workMark(c.k);
     if (!t.work) line += ` ${wm === 'off' ? '휴무로 정한 날이라' : '주말이라'} 순번을 넘기지 않았어요.${wm ? '' : " 특근이면 아래 '이 날 특근'을 눌러 주세요."}`;
@@ -3475,7 +3469,7 @@ function buildLog() {
       '릴리프 업무표 앱에서 내보낸 기록입니다. days에 날짜마다 그날 조건(notes 특이사항·reliefs 그날 릴리프·vacancies 빈자리), 앱이 규칙대로 짠 표(appTable), 실제로 쓴 표(usedTable), 사람이 손으로 바꾼 것(edits), 둘의 차이(diff), 사람이 읽는 표(text)가 있습니다.',
       '표 칸: 키퍼 = 라인 맨 뒤 최종 확인, X = 사이드(대기), "○○ 자리" = 그날 빠진 ○○의 자리를 메움, 연차·조퇴 등 = 그 사람이 그 라운드에 빠짐. 라운드는 1R~4R.',
       '번호(no): 그날 키퍼 시작 = 0번, 오늘 도는 사람을 출근부 순서로 놓고 위로 1·2·3(맨 위 다음은 맨 아래). 1번부터 1R 빈자리에 들어가고, 뒷번호일수록 X를 같거나 더 받습니다.',
-      '키퍼 순번(keeper): 근무일마다 지난 근무일 차례의 출근부 바로 아래 사람. 그날 들어온 사람·기간 릴리프도 출근부 자리대로 낍니다. 표를 남긴 지난 날의 차례는 고정(v8). 차례인 사람이 1R에 없으면 앞 사람이 대신 시작(startedInstead), 앞 사람이 지난 근무일 키퍼면 다음 사람(v8). setByHand = 그날 차례를 손으로 정함.',
+      '키퍼 순번(keeper): 근무일마다 지난 근무일 차례의 출근부 바로 아래 사람. 그날 들어온 사람·기간 릴리프도 출근부 자리대로 낍니다. 표를 남긴 지난 날의 차례는 고정(v8). 차례인 사람이 1R에 없으면 지난 근무일 1R 키퍼가 대신 시작(startedInstead, v8.1). 그 사람도 없으면 앞 순번. setByHand = 그날 차례를 손으로 정함.',
       '원 배치 규칙(v8): 원 = 키퍼 → LH 맨 아래→맨 위 → RH 맨 위→맨 아래, 라운드마다 한 칸씩. 뒷번호가 X를 같거나 더(먼저) → 키퍼 앞뒤 X(X 하나면 앞) → 1번은 키퍼 맞은편, 2번은 키퍼 바로 앞(2R 키퍼), 말번은 키퍼 바로 뒤. 배치 안 번호 순 키퍼(ord) = 원 순서를 바꿔 1R 0번 → 2R 1번 → 3R 2번 → 4R 3번이 키퍼.',
       'appTable.from이 "그날 저장"이면 그날 앱이 실제로 내놓은 표, "지금 다시 계산"이면 v7 전에 만든 기록이라 지금 규칙으로 다시 계산한 표입니다. algo는 그 표를 짠 규칙의 판입니다.',
       '규칙을 고치려면 diff와 edits가 많은 날을 보고, 사람이 왜 앱 표를 바꿨는지(어떤 조건에서 어떤 칸을 옮겼는지) 공통점을 찾으면 됩니다.',
